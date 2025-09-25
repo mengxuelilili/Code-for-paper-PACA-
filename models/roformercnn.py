@@ -231,7 +231,7 @@ class CombinedModel(nn.Module):
             num_heads=num_heads
         )
 
-        # ✅ 新版 AffinityPredictorWithTransformer
+        #  AffinityPredictorWithTransformer
         self.affinity_predictor = AffinityPredictorWithTransformer(
             input_dim=fusion_hidden_dim,
             num_heads=affinity_num_heads,
