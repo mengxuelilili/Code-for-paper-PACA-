@@ -8,10 +8,11 @@ PACA-Affinity/
 ├── data/                   # Raw dataset files (e.g., CSV/FASTA with affinity values)
 ├── dataset/
 │   └── datadeal.py         # Data preprocessing, encoding, and embedding generation
+|   └── testdata.py         # Evaluation on an independent dataset
 ├── model/
 │   └── train.py            # Training script
 ├── models/
-│   └── roformerccnn.py     # Model architecture definition (RoFormer + CCNN)
+│   └── roformerccnn.py     # Model architecture definition 
 ├── pltantigen.py           # Script for antigen sequence processing
 ├── pltattentioncdr.py      # Script to visualize attention weights in CDR regions
 ├── pltCDR.py               # Script for CDR region extraction and analysis
