@@ -12,7 +12,7 @@ from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from scipy.stats import pearsonr
-from roformercnn import CombinedModel
+from models.roformercnn import CombinedModel
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
