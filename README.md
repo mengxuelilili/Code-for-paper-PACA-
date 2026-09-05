@@ -10,7 +10,7 @@ This repository contains the code for **PACA‑Affinity**, a sequence‑based de
 ### 1. Data Preprocessing
 Run `dataset/datadeal.py` to perform data preprocessing.
 
-Then run `dataset/pre_split_test_sets.py` first to perform fixed 6:2:2 train‑val‑test split for each dataset.
+Then run `dataset/pre_split_test_sets.py` first to perform fixed `6:2:2` train‑val‑test split for each dataset.
 The partitioned test set will be saved as independent `.pt` files and **permanently locked**.
 Only `train + val` subsets are used for main model experiments.
 
