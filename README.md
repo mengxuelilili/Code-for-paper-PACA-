@@ -14,7 +14,7 @@ Run `dataset/datadeal.py` to perform data preprocessing.
 Run `model/train.py` to train the model.
 
 ### 3. Model Prediction
-Run `predict.py` to make predictions using the trained model.
+Run `predictionPA.py` to make predictions using the trained model.
 
 ### 4. Model Architecture
 Refer to `models/roformerccnn.py` to view the model architecture.
