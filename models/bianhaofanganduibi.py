@@ -165,11 +165,94 @@
 #     plt.savefig(f'{metric}_comparison.png', bbox_inches='tight', dpi=300)
 #     plt.show()
 
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# import numpy as np
+
+# # 准备数据
+# data = {
+#     'Paddle2021': {
+#         'AbM': {'MSE': 0.7563, 'RMSE': 0.8696, 'MAE': 0.6190, 'R2': 0.3410, 'PCC': 0.5942},
+#         'Imgt': {'MSE': 0.7413, 'RMSE': 0.8610, 'MAE': 0.6180, 'R2': 0.3540, 'PCC': 0.6019},
+#         'Kabat': {'MSE': 0.7415, 'RMSE': 0.8611, 'MAE': 0.6392, 'R2': 0.3539, 'PCC': 0.5985},
+#         'chothia': {'MSE': 0.6835, 'RMSE': 0.8267, 'MAE': 0.6034, 'R2': 0.4044, 'PCC': 0.6398}
+#     },
+#     'SAbDab': {
+#         'AbM': {'MSE': 0.5362, 'RMSE': 0.7323, 'MAE': 0.5957, 'R2': 0.4468, 'PCC': 0.6699},
+#         'Imgt': {'MSE': 0.7090, 'RMSE': 0.8420, 'MAE': 0.6730, 'R2': 0.2685, 'PCC': 0.6729},
+#         'Kabat': {'MSE': 0.5770, 'RMSE': 0.7596, 'MAE': 0.6002, 'R2': 0.4048, 'PCC': 0.6379},
+#         'chothia': {'MSE': 0.5049, 'RMSE': 0.7105, 'MAE': 0.5595, 'R2': 0.4792, 'PCC': 0.7100}
+#     },
+#     'AB_Bind': {
+#         'AbM': {'MSE': 0.4114, 'RMSE': 0.6414, 'MAE': 0.4477, 'R2': 0.6142, 'PCC': 0.7838},
+#         'Imgt': {'MSE': 0.4206, 'RMSE': 0.6486, 'MAE': 0.4640, 'R2': 0.6056, 'PCC': 0.7784},
+#         'Kabat': {'MSE': 0.4302, 'RMSE': 0.6559, 'MAE': 0.4639, 'R2': 0.5966, 'PCC': 0.7772},
+#         'chothia': {'MSE': 0.3769, 'RMSE': 0.6139, 'MAE': 0.4289, 'R2': 0.6466, 'PCC': 0.8042}
+#     },
+#     'SKEMPI2.0': {
+#         'AbM': {'MSE': 0.4663, 'RMSE': 0.6829, 'MAE': 0.5103, 'R2': 0.4625, 'PCC': 0.7254},
+#         'Imgt': {'MSE': 0.4796, 'RMSE': 0.6925, 'MAE': 0.5398, 'R2': 0.4472, 'PCC': 0.7209},
+#         'Kabat': {'MSE': 0.4548, 'RMSE': 0.6744, 'MAE': 0.4756, 'R2': 0.4758, 'PCC': 0.7212},
+#         'chothia': {'MSE': 0.4454, 'RMSE': 0.6674, 'MAE': 0.4883, 'R2': 0.4866, 'PCC': 0.7428}
+#     }
+# }
+
+# # 转换为DataFrame
+# df = pd.DataFrame.from_dict({(i, j): data[i][j]
+#                              for i in data.keys()
+#                              for j in data[i].keys()},
+#                             orient='index').reset_index()
+# df.columns = ['Dataset', 'Scheme', 'MSE', 'RMSE', 'MAE', 'R2', 'PCC']
+
+# # 设置绘图参数
+# plt.style.use('seaborn')
+# colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']  # 四种颜色对应四种编号方案
+# schemes = ['AbM', 'Imgt', 'Kabat', 'chothia']
+# metrics = ['MSE', 'RMSE', 'MAE', 'R2', 'PCC']
+# datasets = ['Paddle2021', 'SAbDab', 'AB_Bind', 'SKEMPI2.0']
+# width = 0.2  # 柱子的宽度
+
+# # 为每个指标单独绘制图表
+# for metric in metrics:
+#     plt.figure(figsize=(10, 6))
+#     # 设置每个柱子的位置
+#     x = np.arange(len(datasets))
+#     # 绘制每种编号方案的柱子
+#     for j, scheme in enumerate(schemes):
+#         values = df[df['Scheme'] == scheme].set_index('Dataset')[metric]
+#         plt.bar(x + j * width, values.loc[datasets], width, label=scheme, color=colors[j])
+
+#     # 添加图表元素
+#     plt.title(f'{metric.upper()} Comparison Across Datasets', fontsize=16, fontweight='bold')  # 增大标题字体并加粗
+#     plt.xlabel('Dataset', fontsize=14, fontweight='bold')  # 增大x轴标签字体并加粗
+#     plt.ylabel(metric.upper(), fontsize=14, fontweight='bold')  # 增大y轴标签字体并加粗
+#     plt.xticks(x + width * 1.5, datasets, fontsize=12, fontweight='bold')  # 增大x轴刻度字体并加粗
+#     plt.yticks(fontsize=12, fontweight='bold')  # 增大y轴刻度字体并加粗
+#     plt.grid(True, linestyle='--', alpha=0.6)
+#     legend = plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=14, frameon=True, edgecolor='black', facecolor='white')
+#     for text in legend.get_texts():
+#         text.set_weight('bold')  # 设置图例字体加粗
+
+#     # 调整y轴范围
+#     if metric == 'R2':
+#         plt.ylim(0, 0.6)
+#     elif metric == 'PCC':
+#         plt.ylim(0.4, 0.8)
+
+#     # 调整布局并保存
+#     plt.tight_layout()
+#     plt.savefig(f'{metric}_comparison.png', bbox_inches='tight', dpi=330)
+#     plt.show()
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
+import os
 
-# 准备数据
+# ======================================================
+# 1. 准备数据
+# ======================================================
 data = {
     'Paddle2021': {
         'AbM': {'MSE': 0.7563, 'RMSE': 0.8696, 'MAE': 0.6190, 'R2': 0.3410, 'PCC': 0.5942},
@@ -204,42 +287,65 @@ df = pd.DataFrame.from_dict({(i, j): data[i][j]
                             orient='index').reset_index()
 df.columns = ['Dataset', 'Scheme', 'MSE', 'RMSE', 'MAE', 'R2', 'PCC']
 
-# 设置绘图参数
-plt.style.use('seaborn')
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']  # 四种颜色对应四种编号方案
+# ======================================================
+# 2. 设置绘图参数
+# ======================================================
+# 使用 seaborn 原生 API 替代 plt.style.use('seaborn')，消除警告
+sns.set_theme() 
+
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'] 
 schemes = ['AbM', 'Imgt', 'Kabat', 'chothia']
 metrics = ['MSE', 'RMSE', 'MAE', 'R2', 'PCC']
 datasets = ['Paddle2021', 'SAbDab', 'AB_Bind', 'SKEMPI2.0']
-width = 0.2  # 柱子的宽度
+width = 0.2 
 
-# 为每个指标单独绘制图表
+output_dir = '/root/autodl-tmp/AbAgCDR/bianhaofangAn/'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+# ======================================================
+# 3. 循环绘图
+# ======================================================
 for metric in metrics:
     plt.figure(figsize=(10, 6))
-    # 设置每个柱子的位置
+    
     x = np.arange(len(datasets))
-    # 绘制每种编号方案的柱子
+    
+    # 绘制柱子
     for j, scheme in enumerate(schemes):
         values = df[df['Scheme'] == scheme].set_index('Dataset')[metric]
         plt.bar(x + j * width, values.loc[datasets], width, label=scheme, color=colors[j])
 
-    # 添加图表元素
-    plt.title(f'{metric.upper()} Comparison Across Datasets', fontsize=16, fontweight='bold')  # 增大标题字体并加粗
-    plt.xlabel('Dataset', fontsize=14, fontweight='bold')  # 增大x轴标签字体并加粗
-    plt.ylabel(metric.upper(), fontsize=14, fontweight='bold')  # 增大y轴标签字体并加粗
-    plt.xticks(x + width * 1.5, datasets, fontsize=12, fontweight='bold')  # 增大x轴刻度字体并加粗
-    plt.yticks(fontsize=12, fontweight='bold')  # 增大y轴刻度字体并加粗
+    # --- 核心修改：使用 \mathbf 替代 \boldsymbol ---
+    if metric == 'R2':
+        # \mathbf 是 Matplotlib 原生支持的粗体命令，不会报错
+        title_text = r'$\mathbf{R}^2$ Comparison Across Datasets'
+        ylabel_text = r'$\mathbf{R}^2$'
+    else:
+        title_text = f'{metric.upper()} Comparison Across Datasets'
+        ylabel_text = metric.upper()
+    
+    plt.title(title_text, fontsize=16, fontweight='bold')
+    plt.xlabel('Dataset', fontsize=14, fontweight='bold')
+    plt.ylabel(ylabel_text, fontsize=14, fontweight='bold')
+        
+    plt.xticks(x + width * 1.5, datasets, fontsize=12, fontweight='bold')
+    plt.yticks(fontsize=12, fontweight='bold')
+    
     plt.grid(True, linestyle='--', alpha=0.6)
-    legend = plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=14, frameon=True, edgecolor='black', facecolor='white')
+    legend = plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+                        fontsize=14, frameon=True, edgecolor='black', facecolor='white')
     for text in legend.get_texts():
-        text.set_weight('bold')  # 设置图例字体加粗
+        text.set_weight('bold') 
 
     # 调整y轴范围
     if metric == 'R2':
-        plt.ylim(0, 0.6)
+        plt.ylim(0, 0.7) 
     elif metric == 'PCC':
-        plt.ylim(0.4, 0.8)
+        plt.ylim(0.4, 0.85)
 
-    # 调整布局并保存
     plt.tight_layout()
-    plt.savefig(f'{metric}_comparison.png', bbox_inches='tight', dpi=330)
+    save_path = os.path.join(output_dir, f'{metric}_comparison.png')
+    plt.savefig(save_path, bbox_inches='tight', dpi=330)
+    print(f"✅ 已保存: {save_path}")
     plt.show()

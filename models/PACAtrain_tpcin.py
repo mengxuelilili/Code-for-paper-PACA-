@@ -1229,6 +1229,135 @@
 # if __name__ == "__main__":
 #     main()
 
+# 画图6
+# import matplotlib.pyplot as plt
+# import numpy as np
+# import pandas as pd
+# from scipy import stats
+# import os
+
+# def plot_residual_analysis(y_true, y_pred_ours, y_pred_base, model_names, save_path):
+#     """绘制精简版残差分析图（论文友好版）"""
+    
+#     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    
+#     # 计算残差
+#     resid_ours = y_pred_ours - y_true
+#     resid_base = y_pred_base - y_true
+    
+#     print("\n" + "="*70)
+#     print("📊 残差统计（验证）")
+#     print("="*70)
+
+#     print(f"{model_names[0]} Mean Residual: {np.mean(resid_ours):.4f}")
+#     print(f"{model_names[1]} Mean Residual: {np.mean(resid_base):.4f}")
+
+#     # =========================
+#     # (a) 残差分布
+#     # =========================
+#     ax = axes[0, 0]
+#     ax.hist(resid_ours, bins=30, alpha=0.6, label=model_names[0], density=True)
+#     ax.hist(resid_base, bins=30, alpha=0.6, label=model_names[1], density=True)
+#     ax.axvline(x=0, linestyle='--')
+#     ax.set_xlabel('Residuals')
+#     ax.set_ylabel('Density')
+#     ax.legend()
+#     ax.set_title('(a) Residual Distribution')
+#     ax.grid(True, alpha=0.3)
+
+
+#     # =========================
+#     # (b) Q-Q Plot (Comparative) - 修改版
+#     # =========================
+#     ax = axes[0, 1]
+    
+#     # 1. 绘制 PACA (蓝色)
+#     # probplot 返回 (osm, osr), slope, intercept, r
+#     # osm: 理论分位数, osr: 实际排序后的数据
+#     osm_ours, osr_ours = stats.probplot(resid_ours, dist="norm", fit=False)
+#     ax.scatter(osm_ours, osr_ours, color='blue', alpha=0.6, s=30, label=model_names[0])
+    
+#     # 2. 绘制 PACARPE (橙色)
+#     osm_base, osr_base = stats.probplot(resid_base, dist="norm", fit=False)
+#     ax.scatter(osm_base, osr_base, color='orange', alpha=0.6, s=30, label=model_names[1])
+    
+#     # 3. 绘制参考红线 (y=x)
+#     # 获取坐标轴范围以绘制对角线
+#     min_val = min(osm_ours.min(), osm_base.min())
+#     max_val = max(osm_ours.max(), osm_base.max())
+#     ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Normal Reference')
+    
+#     ax.set_xlabel('Theoretical Quantiles')
+#     ax.set_ylabel('Ordered Residual Values') # 修改 Y 轴标签更准确
+#     ax.set_title('(b) Q-Q Plot Comparison') # 修改标题
+#     ax.legend()
+#     ax.grid(True, alpha=0.3)
+
+#     # =========================
+#     # (c) Residuals vs Predicted
+#     # =========================
+#     ax = axes[1, 0]
+#     ax.scatter(y_pred_ours, resid_ours, alpha=0.6, label=model_names[0], s=25)
+#     ax.scatter(y_pred_base, resid_base, alpha=0.6, label=model_names[1], s=25)
+#     ax.axhline(y=0, linestyle='--')
+#     ax.set_xlabel('Predicted ΔG')
+#     ax.set_ylabel('Residuals')
+#     ax.legend()
+#     ax.set_title('(c) Residuals vs Predicted')
+#     ax.grid(True, alpha=0.3)
+
+#     # =========================
+#     # (d) Absolute Error vs True
+#     # =========================
+#     ax = axes[1, 1]
+#     ax.scatter(y_true, np.abs(resid_ours), alpha=0.6, label=model_names[0], s=25)
+#     ax.scatter(y_true, np.abs(resid_base), alpha=0.6, label=model_names[1], s=25)
+#     ax.set_xlabel('True ΔG')
+#     ax.set_ylabel('|Residuals|')
+#     ax.legend()
+#     ax.set_title('(d) Absolute Error vs True Values')
+#     ax.grid(True, alpha=0.3)
+
+#     plt.suptitle(f'Paddle2021 Residual Analysis: {model_names[0]} vs {model_names[1]}', fontsize=14)
+#     plt.tight_layout()
+#     plt.savefig(save_path, dpi=300, bbox_inches='tight')
+#     plt.show()
+#     plt.close()
+
+#     print(f"\n✅ 图已保存: {save_path}")
+
+
+# def main():
+#     ours_file = "/root/autodl-tmp/AbAgCDR/resultsxin2/paddle_predictions_seed_42.csv"
+#     base_file = "/root/autodl-tmp/AbAgCDR/resultsxin2/PWAARPEpaddle_predictions_seed_42.csv"
+#     output_plot = "/root/autodl-tmp/AbAgCDR/resultsxin2/paddle_residual_clean.png"
+
+#     print("="*70)
+#     print("🚀 Residual Analysis（论文精简版）")
+#     print("="*70)
+
+#     df_ours = pd.read_csv(ours_file)
+#     df_base = pd.read_csv(base_file)
+
+#     y_true = df_ours['true_ddg'].values
+#     y_pred_ours = df_ours['pred_ddg'].values
+#     y_pred_base = df_base['pred_ddg'].values
+
+#     print(f"\n样本数: {len(y_true)}")
+
+#     plot_residual_analysis(
+#         y_true,
+#         y_pred_ours,
+#         y_pred_base,
+#         ['PACA', 'PACARPE'],
+#         output_plot
+#     )
+
+
+# if __name__ == "__main__":
+#     main()
+
+# 更新画图6，子图带有序号
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -1255,71 +1384,70 @@ def plot_residual_analysis(y_true, y_pred_ours, y_pred_base, model_names, save_p
     # (a) 残差分布
     # =========================
     ax = axes[0, 0]
-    ax.hist(resid_ours, bins=30, alpha=0.6, label=model_names[0], density=True)
-    ax.hist(resid_base, bins=30, alpha=0.6, label=model_names[1], density=True)
-    ax.axvline(x=0, linestyle='--')
+    ax.hist(resid_ours, bins=30, alpha=0.6, label=model_names[0], density=True, color='blue')
+    ax.hist(resid_base, bins=30, alpha=0.6, label=model_names[1], density=True, color='orange')
+    ax.axvline(x=0, linestyle='--', color='black')
     ax.set_xlabel('Residuals')
     ax.set_ylabel('Density')
     ax.legend()
-    ax.set_title('(a) Residual Distribution')
     ax.grid(True, alpha=0.3)
-
+    # # 优化标签位置：更靠近子图左上角，其他三个数据用这个
+    # ax.text(-0.08, 0.98, '(a)', transform=ax.transAxes, fontsize=12, fontweight='bold', va='top')
+    # 优化：移动到子图左上角内部，避开了Y轴刻度文字针对abbind数据的
+    ax.text(-0.095, 0.98, '(a)', transform=ax.transAxes, fontsize=12, fontweight='bold', va='top')
 
     # =========================
-    # (b) Q-Q Plot (Comparative) - 修改版
+    # (b) Q-Q Plot (Comparative)
     # =========================
     ax = axes[0, 1]
     
-    # 1. 绘制 PACA (蓝色)
-    # probplot 返回 (osm, osr), slope, intercept, r
-    # osm: 理论分位数, osr: 实际排序后的数据
     osm_ours, osr_ours = stats.probplot(resid_ours, dist="norm", fit=False)
     ax.scatter(osm_ours, osr_ours, color='blue', alpha=0.6, s=30, label=model_names[0])
     
-    # 2. 绘制 PACARPE (橙色)
     osm_base, osr_base = stats.probplot(resid_base, dist="norm", fit=False)
     ax.scatter(osm_base, osr_base, color='orange', alpha=0.6, s=30, label=model_names[1])
     
-    # 3. 绘制参考红线 (y=x)
-    # 获取坐标轴范围以绘制对角线
     min_val = min(osm_ours.min(), osm_base.min())
     max_val = max(osm_ours.max(), osm_base.max())
     ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Normal Reference')
     
     ax.set_xlabel('Theoretical Quantiles')
-    ax.set_ylabel('Ordered Residual Values') # 修改 Y 轴标签更准确
-    ax.set_title('(b) Q-Q Plot Comparison') # 修改标题
+    ax.set_ylabel('Sample Quantiles')
     ax.legend()
     ax.grid(True, alpha=0.3)
+    # 优化标签位置：更靠近子图左上角
+    ax.text(-0.08, 0.98, '(b)', transform=ax.transAxes, fontsize=12, fontweight='bold', va='top')
 
     # =========================
     # (c) Residuals vs Predicted
     # =========================
     ax = axes[1, 0]
-    ax.scatter(y_pred_ours, resid_ours, alpha=0.6, label=model_names[0], s=25)
-    ax.scatter(y_pred_base, resid_base, alpha=0.6, label=model_names[1], s=25)
-    ax.axhline(y=0, linestyle='--')
-    ax.set_xlabel('Predicted ΔG')
+    ax.scatter(y_pred_ours, resid_ours, alpha=0.6, label=model_names[0], s=25, color='blue')
+    ax.scatter(y_pred_base, resid_base, alpha=0.6, label=model_names[1], s=25, color='orange')
+    ax.axhline(y=0, linestyle='--', color='black')
+    ax.set_xlabel('Predicted ΔG(kcal/mol)')
     ax.set_ylabel('Residuals')
     ax.legend()
-    ax.set_title('(c) Residuals vs Predicted')
     ax.grid(True, alpha=0.3)
+    # 优化标签位置：更靠近子图左上角
+    ax.text(-0.08, 0.98, '(c)', transform=ax.transAxes, fontsize=12, fontweight='bold', va='top')
 
     # =========================
     # (d) Absolute Error vs True
     # =========================
     ax = axes[1, 1]
-    ax.scatter(y_true, np.abs(resid_ours), alpha=0.6, label=model_names[0], s=25)
-    ax.scatter(y_true, np.abs(resid_base), alpha=0.6, label=model_names[1], s=25)
-    ax.set_xlabel('True ΔG')
+    ax.scatter(y_true, np.abs(resid_ours), alpha=0.6, label=model_names[0], s=25, color='blue')
+    ax.scatter(y_true, np.abs(resid_base), alpha=0.6, label=model_names[1], s=25, color='orange')
+    ax.set_xlabel('True ΔG(kcal/mol)')
     ax.set_ylabel('|Residuals|')
     ax.legend()
-    ax.set_title('(d) Absolute Error vs True Values')
     ax.grid(True, alpha=0.3)
+    # 优化标签位置：更靠近子图左上角
+    ax.text(-0.08, 0.98, '(d)', transform=ax.transAxes, fontsize=12, fontweight='bold', va='top')
 
-    plt.suptitle(f'Paddle2021 Residual Analysis: {model_names[0]} vs {model_names[1]}', fontsize=14)
+    plt.suptitle(f'AB-Bind Residual Analysis: {model_names[0]} vs {model_names[1]}', fontsize=14)
     plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path, dpi=330, bbox_inches='tight')
     plt.show()
     plt.close()
 
@@ -1327,9 +1455,9 @@ def plot_residual_analysis(y_true, y_pred_ours, y_pred_base, model_names, save_p
 
 
 def main():
-    ours_file = "/tmp/AbAgCDR/resultsxin/train_predictions.csv"
-    base_file = "/tmp/AbAgCDR/resultsxin/PWAARPEtrain_predictions.csv"
-    output_plot = "/tmp/AbAgCDR/resultsxin/train_residual_clean.png"
+    ours_file = "/root/autodl-tmp/AbAgCDR/resultsxin2/skempi_predictions_seed_42.csv"
+    base_file = "/root/autodl-tmp/AbAgCDR/resultsxin2/PWAARPEskempi_predictions_seed_42.csv"
+    output_plot = "/root/autodl-tmp/AbAgCDR/fig6/abbind_residual_clean2.png"
 
     print("="*70)
     print("🚀 Residual Analysis（论文精简版）")
@@ -1348,13 +1476,162 @@ def main():
         y_true,
         y_pred_ours,
         y_pred_base,
-        ['PACA', 'PACARPE'],
+        ['PACA-Affinity', 'PACA+RPE'],
         output_plot
     )
 
 
 if __name__ == "__main__":
     main()
+
+# # 最后一版更新一次性画出图6四个数据的图位置不合适可以选择不用
+# import matplotlib.pyplot as plt
+# import numpy as np
+# import pandas as pd
+# from scipy import stats
+# import os
+
+# # 全局字体设置（与之前的图保持一致）
+# plt.rcParams['font.family'] = 'Arial'
+# plt.rcParams['font.size'] = 10
+# plt.rcParams['axes.labelsize'] = 12
+# plt.rcParams['axes.titlesize'] = 13
+# plt.rcParams['xtick.labelsize'] = 10
+# plt.rcParams['ytick.labelsize'] = 10
+# plt.rcParams['legend.fontsize'] = 10
+
+# # 数据集配置
+# datasets = ['paddle', 'sabdab', 'abbind', 'skempi']
+# dataset_labels = ['Paddle2021', 'SAbDab', 'AB-Bind', 'SKEMPI2.0']
+# panel_labels = ['A', 'B', 'C', 'D']
+
+# # 颜色配置
+# color_ours = '#2E86AB' # 蓝色 (PACA-Affinity)
+# color_base = '#F39C12' # 橙色 (PACA+RPE)
+
+# # 基础目录
+# base_dir = "/root/autodl-tmp/AbAgCDR/resultsxin2/"
+
+# def plot_residual_analysis_all():
+#     """绘制4数据集残差分析图（4行4列）"""
+    
+#     # 创建 4行 x 4列 的画布
+#     fig, axes = plt.subplots(4, 4, figsize=(20, 14))
+    
+#     for row_idx, dataset in enumerate(datasets):
+#         print(f"\n📊 正在处理数据集: {dataset_labels[row_idx]} ...")
+        
+#         # 【核心修正】直接分别拼接，不依赖任何模板
+#         ours_file = f"{base_dir}{dataset}_predictions_seed_42.csv"
+#         base_file = f"{base_dir}PWAARPE{dataset}_predictions_seed_42.csv"
+        
+#         try:
+#             df_ours = pd.read_csv(ours_file)
+#             df_base = pd.read_csv(base_file)
+            
+#             y_true = df_ours['true_ddg'].values
+#             y_pred_ours = df_ours['pred_ddg'].values
+#             y_pred_base = df_base['pred_ddg'].values
+#         except FileNotFoundError:
+#             print(f"⚠️ 警告: 文件未找到 {ours_file} 或 {base_file}，跳过该数据集。")
+#             continue
+
+#         # 计算残差
+#         resid_ours = y_pred_ours - y_true
+#         resid_base = y_pred_base - y_true
+
+#         # =========================
+#         # (a) 残差分布
+#         # =========================
+#         ax = axes[row_idx, 0]
+#         ax.hist(resid_ours, bins=30, alpha=0.6, label='PACA-Affinity', density=True, color=color_ours)
+#         ax.hist(resid_base, bins=30, alpha=0.6, label='PACA+RPE', density=True, color=color_base)
+#         ax.axvline(x=0, linestyle='--', color='black', linewidth=1)
+#         ax.set_xlabel('Residuals')
+#         if row_idx == 0: ax.set_ylabel('Density')
+#         ax.legend(loc='upper right', fontsize=9)
+#         ax.grid(True, alpha=0.3)
+        
+#         # (a) 标签加在左上角
+#         ax.text(0.02, 0.98, '(a)', transform=ax.transAxes, fontsize=13, fontweight='bold', va='top')
+
+#         # =========================
+#         # (b) Q-Q Plot (Comparative)
+#         # =========================
+#         ax = axes[row_idx, 1]
+#         osm_ours, osr_ours = stats.probplot(resid_ours, dist="norm", fit=False)
+#         ax.scatter(osm_ours, osr_ours, color=color_ours, alpha=0.6, s=25, label='PACA-Affinity')
+        
+#         osm_base, osr_base = stats.probplot(resid_base, dist="norm", fit=False)
+#         ax.scatter(osm_base, osr_base, color=color_base, alpha=0.6, s=25, label='PACA+RPE')
+        
+#         min_val = min(osm_ours.min(), osm_base.min())
+#         max_val = max(osm_ours.max(), osm_base.max())
+#         ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=1.5, label='Normal Reference')
+        
+#         ax.set_xlabel('Theoretical Quantiles')
+#         if row_idx == 0: ax.set_ylabel('Sample Quantiles')
+#         ax.legend(loc='upper left', fontsize=9)
+#         ax.grid(True, alpha=0.3)
+        
+#         # (b) 标签加在左上角
+#         ax.text(0.02, 0.98, '(b)', transform=ax.transAxes, fontsize=13, fontweight='bold', va='top')
+
+#         # =========================
+#         # (c) Residuals vs Predicted
+#         # =========================
+#         ax = axes[row_idx, 2]
+#         ax.scatter(y_pred_ours, resid_ours, alpha=0.6, label='PACA-Affinity', s=20, color=color_ours)
+#         ax.scatter(y_pred_base, resid_base, alpha=0.6, label='PACA+RPE', s=20, color=color_base)
+#         ax.axhline(y=0, linestyle='--', color='black', linewidth=1)
+#         ax.set_xlabel('Predicted $\\Delta G$(kcal/mol)')
+#         if row_idx == 0: ax.set_ylabel('Residuals')
+#         ax.legend(loc='upper right', fontsize=9)
+#         ax.grid(True, alpha=0.3)
+        
+#         # (c) 标签加在左上角
+#         ax.text(0.02, 0.98, '(c)', transform=ax.transAxes, fontsize=13, fontweight='bold', va='top')
+
+#         # =========================
+#         # (d) Absolute Error vs True
+#         # =========================
+#         ax = axes[row_idx, 3]
+#         ax.scatter(y_true, np.abs(resid_ours), alpha=0.6, label='PACA-Affinity', s=20, color=color_ours)
+#         ax.scatter(y_true, np.abs(resid_base), alpha=0.6, label='PACA+RPE', s=20, color=color_base)
+#         ax.set_xlabel('True $\\Delta G$(kcal/mol)')
+#         if row_idx == 0: ax.set_ylabel('|Residuals|')
+#         ax.legend(loc='upper right', fontsize=9)
+#         ax.grid(True, alpha=0.3)
+        
+#         # (d) 标签加在左上角
+#         ax.text(0.02, 0.98, '(d)', transform=ax.transAxes, fontsize=13, fontweight='bold', va='top')
+
+#         # =========================
+#         # 面板标签 A/B/C/D (加在最左侧图的左上角外部)
+#         # =========================
+#         ax_left = axes[row_idx, 0]
+#         ax_left.text(-0.10, 1.02, panel_labels[row_idx], 
+#                      transform=ax_left.transAxes, 
+#                      fontsize=18, fontweight='bold', va='bottom', ha='right')
+
+#     # 调节布局间距
+#     plt.subplots_adjust(left=0.06, right=0.98, top=0.95, bottom=0.04,
+#                         hspace=0.35, wspace=0.25)
+    
+#     output_dir = '/root/autodl-tmp/AbAgCDR/fig6/'
+#     if not os.path.exists(output_dir):
+#         os.makedirs(output_dir)
+#     output_path = os.path.join(output_dir, 'fig6_all_datasets_improved.png')
+    
+#     plt.savefig(output_path, dpi=330, bbox_inches='tight')
+#     print(f"\n✅ 图6已保存: {output_path}")
+#     plt.close()
+
+
+# if __name__ == "__main__":
+#     plot_residual_analysis_all()
+
+
 
 # import matplotlib.pyplot as plt
 # import numpy as np

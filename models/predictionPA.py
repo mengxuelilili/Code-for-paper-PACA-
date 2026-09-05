@@ -1,3 +1,213 @@
+# # 预测的是真实值
+# import torch
+# import torch.nn as nn
+# from torch.utils.data import Dataset, DataLoader
+# import numpy as np
+# import pandas as pd
+# import os
+# import matplotlib.pyplot as plt
+# from roformercnn import CombinedModel
+
+# # ======================================================
+# # CDR 区域定义（Chothia）
+# # ======================================================
+# def getCDRPos(_loop, cdr_scheme='chothia'):
+#     CDRS = {
+#         'L1': ['24','25','26','27','28','29','30','30A','30B','30C','30D','30E','30F','30G','30H','30I','31','32','33','34'],
+#         'L2': ['50','51','51A','52','52A','52B','52C','52D','53','54','55','56'],
+#         'L3': ['89','90','91','92','93','94','95','95A','95B','95C','95D','95E','95F','95G','95H','95I','95J','96','97'],
+#         'H1': ['26','27','28','29','30','31','31A','31B','31C','31D','31E','31F','31G','31H','31I','31J','32'],
+#         'H2': ['52','52A','52B','52C','52D','52E','52F','52G','52H','52I','52J','52K','52L','52M','52N','52O','53','54','55','56'],
+#         'H3': ['95','96','97','98','99','100','100A','100B','100C','100D','100E','100F','100G','100H',
+#                '100I','100J','100K','100L','100M','100N','100O','100P','100Q','100R','100S','100T',
+#                '100U','100V','100W','100X','100Y','100Z','101','102']
+#     }
+#     return CDRS[_loop]
+
+# # ======================================================
+# # Dataset & Collate
+# # ======================================================
+# class ListDataset(Dataset):
+#     def __init__(self, samples):
+#         self.samples = samples
+
+#     def __len__(self):
+#         return len(self.samples)
+
+#     def __getitem__(self, idx):
+#         return self.samples[idx]
+
+
+# def collate_fn(batch):
+#     X_a_list = [torch.tensor(item[0], dtype=torch.float32) if not isinstance(item[0], torch.Tensor) else item[0] for item in batch]
+#     X_b_list = [torch.tensor(item[1], dtype=torch.float32) if not isinstance(item[1], torch.Tensor) else item[1] for item in batch]
+#     ag_list = [torch.tensor(item[2], dtype=torch.float32) if not isinstance(item[2], torch.Tensor) else item[2] for item in batch]
+#     y_list = [torch.tensor(item[3], dtype=torch.float32) if not isinstance(item[3], torch.Tensor) else item[3] for item in batch]
+
+#     max_len = max(
+#         max(x.shape[0] for x in X_a_list),
+#         max(x.shape[0] for x in X_b_list),
+#         max(x.shape[0] for x in ag_list)
+#     )
+
+#     def pad_to_len(x, L):
+#         if x.shape[0] < L:
+#             pad = torch.zeros(L - x.shape[0], x.shape[1], dtype=x.dtype)
+#             return torch.cat([x, pad], dim=0)
+#         else:
+#             return x[:L]
+
+#     X_a_padded = torch.stack([pad_to_len(x, max_len) for x in X_a_list])
+#     X_b_padded = torch.stack([pad_to_len(x, max_len) for x in X_b_list])
+#     ag_padded = torch.stack([pad_to_len(x, max_len) for x in ag_list])
+#     y_tensor = torch.stack(y_list)
+
+#     return X_a_padded, X_b_padded, ag_padded, y_tensor
+
+
+# # ======================================================
+# # 主函数：预测 + 保存结果
+# # ======================================================
+# def main():
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     print(f"Using device: {device}")
+
+#     # ======================================================
+#     # 配置
+#     # ======================================================
+#     DATASETS = ['paddle', 'abbind', 'sabdab', 'skempi']
+    
+#     # 模型路径（使用最佳模型）
+#     model_path = "/tmp/AbAgCDR/model/PWAARPEbest_model_seed_42.pth"
+    
+#     # 测试集路径
+#     test_dir = "/root/autodl-tmp/AbAgCDR/data_split/"
+    
+#     # 输出目录
+#     output_dir = "/root/autodl-tmp/AbAgCDR/resultsxin2"
+#     os.makedirs(output_dir, exist_ok=True)
+
+#     # ======================================================
+#     # 加载模型和 label_scaler
+#     # ======================================================
+#     checkpoint = torch.load(model_path, map_location="cpu")
+#     label_scaler = checkpoint.get("label_scaler", None)
+#     if label_scaler is None:
+#         raise ValueError("❌ label_scaler not found in model checkpoint!")
+
+#     model = CombinedModel(
+#         [getCDRPos("H1"), getCDRPos("H2"), getCDRPos("H3")],
+#         [getCDRPos("L1"), getCDRPos("L2"), getCDRPos("L3")],
+#         num_heads=2,
+#         embed_dim=532,
+#         antigen_embed_dim=500
+#     )
+#     model.load_state_dict(checkpoint["model_state_dict"])
+#     model.to(device)
+#     model.eval()
+#     print(f"✅ 模型加载成功: {model_path}")
+
+#     # ======================================================
+#     # 对每个测试集进行预测
+#     # ======================================================
+#     for name in DATASETS:
+#         print(f"\n{'='*50}")
+#         print(f"📊 处理 {name.upper()}")
+#         print('='*50)
+        
+#         # 1. 加载测试集 PT
+#         test_pt_path = os.path.join(test_dir, f"{name}_test.pt")
+#         if not os.path.exists(test_pt_path):
+#             print(f"  ⚠️ 测试集不存在: {test_pt_path}")
+#             continue
+        
+#         data = torch.load(test_pt_path, map_location="cpu")
+#         X_a = data["X_a"].cpu().numpy()
+#         X_b = data["X_b"].cpu().numpy()
+#         antigen = data["antigen"].cpu().numpy()
+#         y_normalized = data["y"].cpu().numpy()
+        
+#         print(f"  测试集样本数: {len(y_normalized)}")
+        
+#         # 2. 构建 DataLoader
+#         samples = [(X_a[i], X_b[i], antigen[i], y_normalized[i]) for i in range(len(y_normalized))]
+#         dataloader = DataLoader(
+#             ListDataset(samples),
+#             batch_size=32,
+#             shuffle=False,
+#             collate_fn=collate_fn
+#         )
+        
+#         # 3. 预测
+#         pred_normalized_list = []
+#         with torch.no_grad():
+#             for X_a_batch, X_b_batch, ag_batch, _ in dataloader:
+#                 X_a_batch = X_a_batch.to(device)
+#                 X_b_batch = X_b_batch.to(device)
+#                 ag_batch = ag_batch.to(device)
+#                 pred = model(X_b_batch, X_a_batch, ag_batch).view(-1)
+#                 pred_normalized_list.extend(pred.cpu().numpy())
+        
+#         pred_normalized = np.array(pred_normalized_list).reshape(-1, 1)
+        
+#         # 4. 反归一化到真实单位
+#         y_true = label_scaler.inverse_transform(y_normalized.reshape(-1, 1)).flatten()
+#         y_pred = label_scaler.inverse_transform(pred_normalized).flatten()
+        
+#         # 5. 计算指标
+#         from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+#         from scipy.stats import pearsonr
+        
+#         r2 = r2_score(y_true, y_pred)
+#         pcc, _ = pearsonr(y_true, y_pred)
+#         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+#         mae = mean_absolute_error(y_true, y_pred)
+        
+#         print(f"  ✅ 预测完成!")
+#         print(f"     R²:   {r2:.4f}")
+#         print(f"     PCC:  {pcc:.4f}")
+#         print(f"     RMSE: {rmse:.4f}")
+#         print(f"     MAE:  {mae:.4f}")
+        
+#         # 6. 保存 CSV（包含真实值和预测值）
+#         result_df = pd.DataFrame({
+#             'Index': np.arange(len(y_true)),
+#             'true_ddg': y_true,
+#             'pred_ddg': y_pred
+#         })
+#         output_csv = os.path.join(output_dir, f"PWAARPE{name}_predictions_seed_42.csv")
+#         result_df.to_csv(output_csv, index=False)
+#         print(f"  💾 保存: {output_csv}")
+        
+#         # 7. 保存独立的回归图（可选）
+#         fig, ax = plt.subplots(figsize=(6, 5))
+#         ax.scatter(y_true, y_pred, alpha=0.6, s=20, color='#1f77b4', edgecolors='black', linewidth=0.5)
+#         min_val = min(y_true.min(), y_pred.min()) - 0.5
+#         max_val = max(y_true.max(), y_pred.max()) + 0.5
+#         ax.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='y = x')
+#         ax.set_xlabel('True ΔG (kcal/mol)')
+#         ax.set_ylabel('Predicted ΔG (kcal/mol)')
+#         ax.set_title(f'{name.upper()} Regression: True vs Predicted ΔG')
+#         ax.legend()
+#         ax.grid(True, alpha=0.3)
+#         ax.set_xlim(min_val, max_val)
+#         ax.set_ylim(min_val, max_val)
+        
+#         plot_path = os.path.join(output_dir, f"PWAARPE{name}_regression_plot_seed_42.png")
+#         plt.tight_layout()
+#         plt.savefig(plot_path, dpi=330)
+#         plt.close()
+#         print(f"  🎨 回归图保存: {plot_path}")
+    
+#     print("\n" + "="*60)
+#     print("✅ 所有数据集预测完成！")
+#     print(f"输出目录: {output_dir}")
+#     print("="*60)
+
+
+# if __name__ == "__main__":
+#     main()
+
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -22,7 +232,6 @@ def getCDRPos(_loop, cdr_scheme='chothia'):
                '100U','100V','100W','100X','100Y','100Z','101','102']
     }
     return CDRS[_loop]
-
 
 # ======================================================
 # Dataset & Collate
@@ -66,26 +275,34 @@ def collate_fn(batch):
 
 
 # ======================================================
-# Main Prediction + Plot Function
+# 主函数：预测 + 保存结果（包含归一化与反归一化两套指标）
 # ======================================================
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # --- Paths ---
-    model_path = "/tmp/AbAgCDR/model/best_modelxin.pth"
-    embed_path = "/tmp/AbAgCDR/data/abbind_data.pt"
-    tsv_path = "/tmp/AbAgCDR/data/pairs_seq_abbind2_clean.tsv"
-    output_dir = "/tmp/AbAgCDR/resultsxin"
-    os.makedirs(output_dir, exist_ok=True) 
-    output_csv = os.path.join(output_dir, "abbind_predictions.csv")    # abbind_predictions.csv abbind_predictions_seed_42.csv
-    plot_path = os.path.join(output_dir, "abbindregression_plot.png")  # abbind_regression_plot.png abbind_regression_plot_seed_42.png
+    # ======================================================
+    # 配置
+    # ======================================================
+    DATASETS = ['paddle', 'abbind', 'sabdab', 'skempi']
+    
+    # 模型路径（使用最佳模型）
+    model_path = "/tmp/AbAgCDR/model/best_model_seed_42.pth"
+    
+    # 测试集路径
+    test_dir = "/root/autodl-tmp/AbAgCDR/data_split/"
+    
+    # 输出目录
+    output_dir = "/root/autodl-tmp/AbAgCDR/resultsxin3guiyihua"
+    os.makedirs(output_dir, exist_ok=True)
 
-    # --- Load model and scaler ---
+    # ======================================================
+    # 加载模型和 label_scaler
+    # ======================================================
     checkpoint = torch.load(model_path, map_location="cpu")
     label_scaler = checkpoint.get("label_scaler", None)
     if label_scaler is None:
-        raise ValueError("❌ label_scaler not found in model checkpoint! Cannot inverse transform predictions.")
+        raise ValueError("❌ label_scaler not found in model checkpoint!")
 
     model = CombinedModel(
         [getCDRPos("H1"), getCDRPos("H2"), getCDRPos("H3")],
@@ -97,71 +314,132 @@ def main():
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     model.eval()
+    print(f"✅ 模型加载成功: {model_path}")
 
-    # --- Load original TSV to get TRUE (unnormalized) delta_g ---
-    df_tsv = pd.read_csv(tsv_path, sep="\t")
-    if "delta_g" not in df_tsv.columns:
-        raise KeyError("❌ TSV file must contain 'delta_g' column for true values.")
-    true_ddg_original = df_tsv["delta_g"].values
+    # 导入指标计算库
+    from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+    from scipy.stats import pearsonr
 
-    # --- Load embedding data ---
-    data = torch.load(embed_path, map_location="cpu")
-    X_a = data["X_a"].cpu().numpy()
-    X_b = data["X_b"].cpu().numpy()
-    antigen = data["antigen"].cpu().numpy()
-    y_normalized = data["y"].cpu().numpy()
+    # ======================================================
+    # 对每个测试集进行预测
+    # ======================================================
+    for name in DATASETS:
+        print(f"\n{'='*50}")
+        print(f"📊 处理 {name.upper()}")
+        print('='*50)
+        
+        # 1. 加载测试集 PT
+        test_pt_path = os.path.join(test_dir, f"{name}_test.pt")
+        if not os.path.exists(test_pt_path):
+            print(f"  ⚠️ 测试集不存在: {test_pt_path}")
+            continue
+        
+        data = torch.load(test_pt_path, map_location="cpu")
+        X_a = data["X_a"].cpu().numpy()
+        X_b = data["X_b"].cpu().numpy()
+        antigen = data["antigen"].cpu().numpy()
+        y_normalized = data["y"].cpu().numpy()
+        
+        print(f"  测试集样本数: {len(y_normalized)}")
+        
+        # 2. 构建 DataLoader
+        samples = [(X_a[i], X_b[i], antigen[i], y_normalized[i]) for i in range(len(y_normalized))]
+        dataloader = DataLoader(
+            ListDataset(samples),
+            batch_size=32,
+            shuffle=False,
+            collate_fn=collate_fn
+        )
+        
+        # 3. 预测 (此时输出的是归一化值)
+        pred_normalized_list = []
+        with torch.no_grad():
+            for X_a_batch, X_b_batch, ag_batch, _ in dataloader:
+                X_a_batch = X_a_batch.to(device)
+                X_b_batch = X_b_batch.to(device)
+                ag_batch = ag_batch.to(device)
+                pred = model(X_b_batch, X_a_batch, ag_batch).view(-1)
+                pred_normalized_list.extend(pred.cpu().numpy())
+        
+        pred_normalized = np.array(pred_normalized_list).reshape(-1, 1)
+        y_norm_flat = y_normalized.reshape(-1, 1)
 
-    assert len(true_ddg_original) == len(y_normalized), \
-        f"TSV rows ({len(true_ddg_original)}) != embedding samples ({len(y_normalized)})"
+        # --------------------------------------------------
+        # 【新增】计算并保存【归一化空间】的指标和结果
+        # --------------------------------------------------
+        r2_norm = r2_score(y_norm_flat, pred_normalized)
+        pcc_norm, _ = pearsonr(y_norm_flat.flatten(), pred_normalized.flatten())
+        rmse_norm = np.sqrt(mean_squared_error(y_norm_flat, pred_normalized))
+        mae_norm = mean_absolute_error(y_norm_flat, pred_normalized)
+        
+        print(f"  📉 [归一化空间] 指标:")
+        print(f"     R²:   {r2_norm:.4f}")
+        print(f"     PCC:  {pcc_norm:.4f}")
+        print(f"     RMSE: {rmse_norm:.4f}")
+        print(f"     MAE:  {mae_norm:.4f}")
+        
+        # 保存归一化结果的 CSV
+        result_df_norm = pd.DataFrame({
+            'Index': np.arange(len(y_norm_flat)),
+            'true_ddg_normalized': y_norm_flat.flatten(),
+            'pred_ddg_normalized': pred_normalized.flatten()
+        })
+        output_csv_norm = os.path.join(output_dir, f"{name}_predictions_normalized_seed_42.csv")
+        result_df_norm.to_csv(output_csv_norm, index=False)
+        print(f"  💾 保存归一化结果: {output_csv_norm}")
 
-    # --- Prepare dataset ---
-    samples = [(X_a[i], X_b[i], antigen[i], y_normalized[i]) for i in range(len(y_normalized))]
-    dataloader = DataLoader(
-        ListDataset(samples),
-        batch_size=32,
-        shuffle=False,
-        collate_fn=collate_fn
-    )
+        # --------------------------------------------------
+        # 【原有】反归一化到真实单位并计算指标
+        # --------------------------------------------------
+        y_true = label_scaler.inverse_transform(y_norm_flat).flatten()
+        y_pred = label_scaler.inverse_transform(pred_normalized).flatten()
+        
+        r2_real = r2_score(y_true, y_pred)
+        pcc_real, _ = pearsonr(y_true, y_pred)
+        rmse_real = np.sqrt(mean_squared_error(y_true, y_pred))
+        mae_real = mean_absolute_error(y_true, y_pred)
+        
+        print(f"  📈 [真实物理空间] 指标:")
+        print(f"     R²:   {r2_real:.4f}")
+        print(f"     PCC:  {pcc_real:.4f}")
+        print(f"     RMSE: {rmse_real:.4f}")
+        print(f"     MAE:  {mae_real:.4f}")
+        
+        # 保存真实值结果的 CSV
+        result_df_real = pd.DataFrame({
+            'Index': np.arange(len(y_true)),
+            'true_ddg': y_true,
+            'pred_ddg': y_pred
+        })
+        output_csv_real = os.path.join(output_dir, f"{name}_predictions_seed_42.csv")
+        result_df_real.to_csv(output_csv_real, index=False)
+        print(f"  💾 保存真实值结果: {output_csv_real}")
+        
+        # 7. 保存回归图 (基于真实值)
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.scatter(y_true, y_pred, alpha=0.6, s=20, color='#1f77b4', edgecolors='black', linewidth=0.5)
+        min_val = min(y_true.min(), y_pred.min()) - 0.5
+        max_val = max(y_true.max(), y_pred.max()) + 0.5
+        ax.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='y = x')
+        ax.set_xlabel('True ΔG (kcal/mol)')
+        ax.set_ylabel('Predicted ΔG (kcal/mol)')
+        ax.set_title(f'{name.upper()} Regression: True vs Predicted ΔG')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(min_val, max_val)
+        ax.set_ylim(min_val, max_val)
+        
+        plot_path = os.path.join(output_dir, f"{name}_regression_plot_seed_42.png")
+        plt.tight_layout()
+        plt.savefig(plot_path, dpi=330)
+        plt.close()
+        print(f"  🎨 回归图保存: {plot_path}")
+    
+    print("\n" + "="*60)
+    print("✅ 所有数据集预测完成！")
+    print(f"输出目录: {output_dir}")
+    print("="*60)
 
-    # --- Run prediction ---
-    pred_normalized_list = []
-    with torch.no_grad():
-        for X_a_batch, X_b_batch, ag_batch, _ in dataloader:
-            X_a_batch = X_a_batch.to(device)
-            X_b_batch = X_b_batch.to(device)
-            ag_batch = ag_batch.to(device)
-            pred = model(X_b_batch, X_a_batch, ag_batch).view(-1)
-            pred_normalized_list.extend(pred.cpu().numpy())
-
-    pred_normalized = np.array(pred_normalized_list).reshape(-1, 1)
-    pred_ddg_original = label_scaler.inverse_transform(pred_normalized).flatten()
-
-    # --- Save results ---
-    result_df = pd.DataFrame({
-        "Index": np.arange(len(true_ddg_original)),
-        "true_ddg": true_ddg_original,
-        "pred_ddg": pred_ddg_original
-    })
-    result_df.to_csv(output_csv, index=False)
-    print(f"✅ Predictions saved to: {output_csv}")
-
-    # --- Plot regression figure ---
-    plt.figure(figsize=(8, 6))
-    plt.scatter(result_df['true_ddg'], result_df['pred_ddg'], alpha=0.6, color='#1f77b4', s=20)
-    min_val = min(result_df['true_ddg'].min(), result_df['pred_ddg'].min())
-    max_val = max(result_df['true_ddg'].max(), result_df['pred_ddg'].max())
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Ideal Fit')
-    plt.xlabel('True ΔG', fontsize=14)
-    plt.ylabel('Predicted ΔG', fontsize=14)
-    plt.title('AB-Bind Regression: True vs Predicted ΔG', fontsize=16)
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.5)
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=330)
-    print(f"🎨 Regression plot saved to: {plot_path}")
-
-    # Optional: show plot if running locally
-    # plt.show()
 
 if __name__ == "__main__":
     main()
