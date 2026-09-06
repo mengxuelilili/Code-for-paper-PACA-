@@ -1,4 +1,4 @@
-# 清洗数据集了，保存5个seed的模型为了显著性分析
+# 清洗数据集了，保存5个seed的模型为了显著性分析，数据集外部划分独立测试集
 import torch
 import torch.nn as nn
 import numpy as np
@@ -17,7 +17,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # ======================================================
-# 1. 随机种子设置函数 (将在 main 中根据参数调用)
+# 1. 随机种子设置函数
 # ======================================================
 def set_seed(seed=42):
     torch.manual_seed(seed)
@@ -25,7 +25,6 @@ def set_seed(seed=42):
         torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
-    # 保持确定性，但这可能会稍微降低速度
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     print(f"🌱 随机种子已设置为: {seed}")
@@ -226,7 +225,7 @@ def getCDRPos(_loop, cdr_scheme='chothia'):
     return CDRS[_loop]
 
 # ======================================================
-# Dataset & Collate (保持不变)
+# Dataset & Collate
 # ======================================================
 class ListDataset(Dataset):
     def __init__(self, samples):
@@ -265,7 +264,7 @@ def collate_fn(batch):
     return X_a_padded, X_b_padded, ag_padded, y_tensor
 
 # ======================================================
-# Evaluation (保持不变)
+# Evaluation
 # ======================================================
 def evaluate(model, loader, device):
     model.eval()
@@ -289,10 +288,22 @@ def evaluate(model, loader, device):
     return {"MSE": mse, "RMSE": rmse, "MAE": mae, "R2": r2, "PCC": pcc}
 
 # ======================================================
-# Data Loading & Splitting
+# Data Loading（简化版，直接加载外部划分好的数据集）
 # ======================================================
-def load_dataset(path):
-    d = torch.load(path, map_location="cpu")
+def load_trainval_data(trainval_path):
+    """加载合并后的 train+val 数据"""
+    d = torch.load(trainval_path, map_location="cpu")
+    return {
+        "X_a": d["X_a"].cpu().numpy(),
+        "X_b": d["X_b"].cpu().numpy(),
+        "antigen": d["antigen"].cpu().numpy(),
+        "y": d["y"].cpu().numpy(),
+        "label_scaler": d.get("label_scaler", None)
+    }
+
+def load_test_data(test_path):
+    """加载独立的测试集（由 pre_split_test_sets.py 预先划分）"""
+    d = torch.load(test_path, map_location="cpu")
     return {
         "X_a": d["X_a"].cpu().numpy(),
         "X_b": d["X_b"].cpu().numpy(),
@@ -300,31 +311,8 @@ def load_dataset(path):
         "y": d["y"].cpu().numpy()
     }
 
-def split_dataset(data, test_size=0.2, val_size=0.2, seed=42):
-    X_a, X_b, ag, y = data["X_a"], data["X_b"], data["antigen"], data["y"]
-    
-    # 【关键修改】：如果想让数据划分也随种子变化，将 random_state=42 改为 random_state=seed
-    # 这里为了保守起见，暂时保持固定划分，仅改变模型初始化。如需完全独立实验，请取消注释下一行的 seed 变量
-    # current_split_seed = seed 
-    current_split_seed = 42 
-
-    X_a_tv, X_a_test, X_b_tv, X_b_test, ag_tv, ag_test, y_tv, y_test = train_test_split(
-        X_a, X_b, ag, y, test_size=test_size, random_state=current_split_seed
-    )
-    
-    val_ratio = val_size / (1 - test_size)
-    X_a_tr, X_a_val, X_b_tr, X_b_val, ag_tr, ag_val, y_tr, y_val = train_test_split(
-        X_a_tv, X_b_tv, ag_tv, y_tv, test_size=val_ratio, random_state=current_split_seed
-    )
-    
-    return {
-        "train": (X_a_tr, X_b_tr, ag_tr, y_tr),
-        "val": (X_a_val, X_b_val, ag_val, y_val),
-        "test": (X_a_test, X_b_test, ag_test, y_test)
-    }
-
 # ======================================================
-# Trainer (保持不变)
+# Trainer
 # ======================================================
 class TrainerWithScheduler:
     def __init__(self, model, train_loader, val_loader, params, device):
@@ -365,7 +353,6 @@ class TrainerWithScheduler:
             val_mse = val_metrics["MSE"]
             self.scheduler.step(val_mse)
             
-            # 减少打印频率，避免日志过多
             if epoch % 10 == 0 or epoch == 1:
                 print(f"  Ep {epoch:02d} | Loss: {avg_train_loss:.4f} | Val MSE: {val_mse:.4f}")
 
@@ -383,7 +370,47 @@ class TrainerWithScheduler:
         return self.model
 
 # ======================================================
-# MAIN (核心修改部分)
+# 保存预测结果
+# ======================================================
+def save_predictions(model, test_data_tuple, dataset_name, result_save_dir, device):
+    """保存单个数据集的预测结果"""
+    samples = []
+    for i in range(len(test_data_tuple[3])):
+        samples.append((test_data_tuple[0][i], test_data_tuple[1][i], test_data_tuple[2][i], test_data_tuple[3][i]))
+    
+    loader = DataLoader(ListDataset(samples), batch_size=32, shuffle=False, collate_fn=collate_fn)
+    
+    y_true_list = []
+    y_pred_list = []
+    indices = []
+
+    with torch.no_grad():
+        for idx, (X_a, X_b, ag, y) in enumerate(loader):
+            if X_a.shape[0] == 0: continue
+            X_a, X_b, ag = X_a.to(device), X_b.to(device), ag.to(device)
+            pred = model(X_b, X_a, ag).view(-1)
+            y_true_list.extend(y.cpu().numpy())
+            y_pred_list.extend(pred.cpu().numpy())
+            start_idx = idx * loader.batch_size
+            indices.extend(range(start_idx, start_idx + len(y)))
+
+    import pandas as pd
+    df = pd.DataFrame({
+        'Index': indices,
+        'true_ddg': y_true_list,
+        'pred_ddg': y_pred_list
+    })
+    
+    out_path = os.path.join(result_save_dir, f"{dataset_name}_predictions_seed_{current_seed}.csv")
+    df.to_csv(out_path, index=False)
+    print(f"✅ Saved predictions for {dataset_name}: {out_path}")
+    
+    mae = mean_absolute_error(y_true_list, y_pred_list)
+    pcc = pearsonr(y_true_list, y_pred_list)[0] if len(set(y_true_list)) > 1 else 0
+    return mae, pcc
+
+# ======================================================
+# MAIN
 # ======================================================
 def main():
     # 1. 解析命令行参数
@@ -391,64 +418,86 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for this run")
     args = parser.parse_args()
     
-    # 2. 设置种子
     set_seed(args.seed)
     current_seed = args.seed
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"💻 Using device: {device}")
 
-    # 数据路径配置
-    base_dir = "/tmp/AbAgCDR/data"
-    paths = {
-        "train": os.path.join(base_dir, "train_data.pt"),
-        "abbind": os.path.join(base_dir, "abbind_data.pt"),
-        "sabdab": os.path.join(base_dir, "sabdab_data.pt"),
-        "skempi": os.path.join(base_dir, "skempi_data.pt")
-    }
+    # ======================================================
+    # 数据路径配置（使用外部预先划分好的数据）
+    # ======================================================
+    DATA_DIR = "/root/autodl-tmp/AbAgCDR/data_split/"
+    MODEL_SAVE_DIR = "/tmp/AbAgCDR/model"
+    RESULT_SAVE_DIR = "/root/autodl-tmp/AbAgCDR/resultsxin"
+    os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
+    os.makedirs(RESULT_SAVE_DIR, exist_ok=True)
 
-    # 输出目录配置 (根据 seed 动态创建或区分)
-    model_save_dir = "/tmp/AbAgCDR/model"
-    result_save_dir = "/tmp/AbAgCDR/resultsxin"
-    os.makedirs(model_save_dir, exist_ok=True)
-    os.makedirs(result_save_dir, exist_ok=True)
+    datasets = ['paddle', 'abbind', 'sabdab', 'skempi']
+    
+    # 加载 label_scaler（从第一个数据集的 trainval 中获取）
+    label_scaler = None
+    first_trainval = os.path.join(DATA_DIR, f"{datasets[0]}_trainval.pt")
+    if os.path.exists(first_trainval):
+        temp = torch.load(first_trainval, map_location="cpu")
+        label_scaler = temp.get("label_scaler", None)
 
-    # Load and split
-    all_splits = {}
-    for name, path in paths.items():
-        if not os.path.exists(path):
-            print(f"⚠️ Warning: File not found: {path}")
-            continue
-        data = load_dataset(path)
-        # 传入 seed 以支持动态划分（如果 split_dataset 内部使用了该参数）
-        all_splits[name] = split_dataset(data, seed=current_seed)
-
-    if not all_splits:
-        print("❌ Error: No data loaded.")
-        return
-
-    # Prepare Samples
+    # ======================================================
+    # 加载所有数据集的 train+val 和独立的 test
+    # ======================================================
     all_train_samples = []
     sample_weights = []
-    dataset_weights = {'train': 4.0, 'abbind': 1.0, 'sabdab': 1.5, 'skempi': 1.5}
-
-    for name in paths.keys():
-        if name not in all_splits: continue
-        tr = all_splits[name]["train"]
-        w = dataset_weights.get(name, 0.1)
-        for i in range(len(tr[3])):
-            all_train_samples.append((tr[0][i], tr[1][i], tr[2][i], tr[3][i]))
-            sample_weights.append(w)
-
+    dataset_weights = {'paddle': 4.0, 'abbind': 1.0, 'sabdab': 1.5, 'skempi': 1.5}
     val_samples = []
-    for name, split in all_splits.items():
-        va = split["val"]
-        for i in range(len(va[3])):
-            val_samples.append((va[0][i], va[1][i], va[2][i], va[3][i]))
+    test_samples_dict = {}
 
+    for name in datasets:
+        # 加载 train+val 数据
+        trainval_path = os.path.join(DATA_DIR, f"{name}_trainval.pt")
+        if not os.path.exists(trainval_path):
+            print(f"⚠️ 文件不存在: {trainval_path}")
+            continue
+        
+        data = load_trainval_data(trainval_path)
+        
+        # 划分 train/val（从 train+val 中再分）
+        # 注意：这里我们仍然用 train_test_split 在 trainval 内部划分
+        X_a_tv, X_b_tv, ag_tv, y_tv = data["X_a"], data["X_b"], data["antigen"], data["y"]
+        
+        val_ratio = 0.2 / 0.8  # 因为 trainval 占总样本的 80%，val 占整体的 20%
+        X_a_tr, X_a_val, X_b_tr, X_b_val, ag_tr, ag_val, y_tr, y_val = train_test_split(
+            X_a_tv, X_b_tv, ag_tv, y_tv, test_size=val_ratio, random_state=42
+        )
+        
+        # 添加到训练集
+        w = dataset_weights.get(name, 1.0)
+        for i in range(len(y_tr)):
+            all_train_samples.append((X_a_tr[i], X_b_tr[i], ag_tr[i], y_tr[i]))
+            sample_weights.append(w)
+        
+        # 添加到验证集
+        for i in range(len(y_val)):
+            val_samples.append((X_a_val[i], X_b_val[i], ag_val[i], y_val[i]))
+        
+        # 加载独立的测试集（外部预先划分好的）
+        test_path = os.path.join(DATA_DIR, f"{name}_test.pt")
+        if os.path.exists(test_path):
+            test_data = load_test_data(test_path)
+            test_samples_dict[name] = []
+            for i in range(len(test_data["y"])):
+                test_samples_dict[name].append(
+                    (test_data["X_a"][i], test_data["X_b"][i], test_data["antigen"][i], test_data["y"][i])
+                )
+            print(f"✅ 加载 {name} 测试集: {len(test_samples_dict[name])} 样本")
+        else:
+            print(f"⚠️ 测试集不存在: {test_path}")
+
+    # ======================================================
+    # 构建 DataLoader
+    # ======================================================
     sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
 
-    # Grid Search Params (简化版以节省时间，可根据需要恢复完整版)
+    # Grid Search
     param_grid = {
         'lr': [1e-4, 5e-4],
         'batch_size': [16, 32],
@@ -468,21 +517,16 @@ def main():
     best_score = -np.inf
     best_params = None
     best_model_state = None
-    
-    # Load scaler if exists (assuming same for all seeds)
-    label_scaler = None
-    first_path = list(paths.values())[0]
-    if os.path.exists(first_path):
-        temp_d = torch.load(first_path, map_location="cpu")
-        label_scaler = temp_d.get("label_scaler", None)
 
     for trial_idx, params in enumerate(param_combinations):
         if trial_idx % 5 == 0:
             print(f"  ... Trial {trial_idx+1}/{len(param_combinations)}")
         
         current_bs = params['batch_size']
-        train_loader = DataLoader(ListDataset(all_train_samples), batch_size=current_bs, sampler=sampler, collate_fn=collate_fn, shuffle=False)
-        val_loader = DataLoader(ListDataset(val_samples), batch_size=current_bs, shuffle=False, collate_fn=collate_fn)
+        train_loader = DataLoader(ListDataset(all_train_samples), batch_size=current_bs, 
+                                  sampler=sampler, collate_fn=collate_fn, shuffle=False)
+        val_loader = DataLoader(ListDataset(val_samples), batch_size=current_bs, 
+                                shuffle=False, collate_fn=collate_fn)
 
         model = CombinedModel(
             [getCDRPos("H1"), getCDRPos("H2"), getCDRPos("H3")],
@@ -501,9 +545,9 @@ def main():
             best_params = copy.deepcopy(params)
             best_model_state = copy.deepcopy(trained_model.state_dict())
 
-    # Save Best Model for THIS Seed
-    model_filename = f"PWAARPEbest_model_seed_{current_seed}.pth"
-    model_path = os.path.join(model_save_dir, model_filename)
+    # 保存最佳模型
+    model_filename = f"best_model_seed_{current_seed}.pth"
+    model_path = os.path.join(MODEL_SAVE_DIR, model_filename)
     
     if best_model_state is not None:
         torch.save({
@@ -512,12 +556,14 @@ def main():
             'label_scaler': label_scaler,
             'seed': current_seed
         }, model_path)
-        print(f"💾 Best model for Seed {current_seed} saved to: {model_path}")
+        print(f"💾 Best model saved to: {model_path}")
     else:
-        print("❌ No model trained successfully for this seed.")
+        print("❌ No model trained successfully.")
         return
 
-    # Final Evaluation & CSV Generation
+    # ======================================================
+    # 在独立的测试集上评估
+    # ======================================================
     final_model = CombinedModel(
         [getCDRPos("H1"), getCDRPos("H2"), getCDRPos("H3")],
         [getCDRPos("L1"), getCDRPos("L2"), getCDRPos("L3")],
@@ -527,69 +573,610 @@ def main():
     final_model.to(device)
     final_model.eval()
 
-    print(f"\n🧪 Generating Predictions for Seed {current_seed}...")
+    print(f"\n🧪 Evaluating on independent test sets for Seed {current_seed}...")
 
-    # Helper to save predictions
-    def save_predictions(name, test_data_tuple, filename_suffix):
-        samples = []
-        for i in range(len(test_data_tuple[3])):
-            samples.append((test_data_tuple[0][i], test_data_tuple[1][i], test_data_tuple[2][i], test_data_tuple[3][i]))
-        
-        loader = DataLoader(ListDataset(samples), batch_size=32, shuffle=False, collate_fn=collate_fn)
-        
-        y_true_list = []
-        y_pred_list = []
-        indices = [] # 如果需要索引列
+    for name, test_samples in test_samples_dict.items():
+        test_loader = DataLoader(ListDataset(test_samples), batch_size=32, shuffle=False, collate_fn=collate_fn)
+        metrics = evaluate(final_model, test_loader, device)
+        print(f"  {name.upper()} TEST → MSE: {metrics['MSE']:.4f}, RMSE: {metrics['RMSE']:.4f}, MAE: {metrics['MAE']:.4f}, R²: {metrics['R2']:.4f}, PCC: {metrics['PCC']:.4f}")
 
-        with torch.no_grad():
-            for idx, (X_a, X_b, ag, y) in enumerate(loader):
-                if X_a.shape[0] == 0: continue
-                X_a, X_b, ag = X_a.to(device), X_b.to(device), ag.to(device)
-                pred = final_model(X_b, X_a, ag).view(-1)
-                
-                y_true_list.extend(y.cpu().numpy())
-                y_pred_list.extend(pred.cpu().numpy())
-                # 生成简单的索引 (全局索引可能需要更复杂的逻辑，这里用相对索引)
-                start_idx = idx * loader.batch_size
-                indices.extend(range(start_idx, start_idx + len(y)))
-
-        import pandas as pd
-        df = pd.DataFrame({
-            'Index': indices,
-            'true_ddg': y_true_list,
-            'pred_ddg': y_pred_list
-        })
-        
-        out_path = os.path.join(result_save_dir, filename_suffix)
-        df.to_csv(out_path, index=False)
-        print(f"✅ Saved predictions for {name}: {out_path}")
-        
-        # Print metrics
-        mae = mean_absolute_error(y_true_list, y_pred_list)
-        pcc = pearsonr(y_true_list, y_pred_list)[0] if len(set(y_true_list))>1 else 0
-        print(f"   -> MAE: {mae:.4f}, PCC: {pcc:.4f}")
-        return mae, pcc
-
-    results_summary = {}
-
-    # Generate for each dataset
-    for name, split in all_splits.items():
-        te = split["test"]
-        file_name = f"PWAARPE{name}_predictions_seed_{current_seed}.csv"
-        mae, pcc = save_predictions(name, te, file_name)
-        results_summary[name] = {'MAE': mae, 'PCC': pcc}
-
-    # Summary
-    print("\n" + "="*60)
-    print(f"🏆 SEED {current_seed} COMPLETE")
-    print("="*60)
-    for name, metrics in results_summary.items():
-        print(f"{name.upper():10} | MAE: {metrics['MAE']:.4f} | PCC: {metrics['PCC']:.4f}")
-    print("="*60)
-    print(f"💡 下一步：请对 seeds 0, 1, 2, 3, 4 重复此过程，然后运行统计脚本。")
+    print("\n✅ Training and evaluation complete.")
 
 if __name__ == "__main__":
     main()
+
+# # 清洗数据集了，保存5个seed的模型为了显著性分析，数据集内部划分独立测试集
+# import torch
+# import torch.nn as nn
+# import numpy as np
+# import random
+# import argparse
+# import os
+# import time
+# import copy
+# import itertools
+# from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+# from sklearn.model_selection import train_test_split
+# from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+# from scipy.stats import pearsonr
+# from models.roformercnn import CombinedModel
+# import torch.optim as optim
+# from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+# # ======================================================
+# # 1. 随机种子设置函数 (将在 main 中根据参数调用)
+# # ======================================================
+# def set_seed(seed=42):
+#     torch.manual_seed(seed)
+#     if torch.cuda.is_available():
+#         torch.cuda.manual_seed_all(seed)
+#     np.random.seed(seed)
+#     random.seed(seed)
+#     # 保持确定性，但这可能会稍微降低速度
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
+#     print(f"🌱 随机种子已设置为: {seed}")
+
+# # ======================================================
+# # CDR 区域定义（Chothia）
+# # ======================================================
+# def getCDRPos(_loop, cdr_scheme='chothia'):
+#     # ASSUMES SEQUENCES ARE NUMBERED IN CHOTHIA SCHEME
+#     if cdr_scheme == 'chothia':
+#         CDRS = {'L1F': ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14',
+#                         '15', '16', '17', '18', '19', '20', '21', '22', '23'],
+#                 'L1': ['24', '25', '26', '27', '28', '29', '30', '30A', '30B', '30C', '30D', '30E', '30F',
+#                        '30G', '30H', '30I', '31', '32', '33', '34'],
+#                 'L2F': ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47',
+#                         '48', '49'],
+#                 'L2': ['50', '51', '51A', '52', '52A', '52B', '52C', '52D', '53', '54', '55', '56'],
+#                 'L3F': ['57', '58', '59', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69', '70', '71', '72',
+#                         '73', '74', '75',
+#                         '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88'],
+#                 'L3': ['89', '90', '91', '92', '93', '94', '95', '95A', '95B', '95C', '95D', '95E', '95F',
+#                        '95G', '95H', '95I', '95J', '96', '97'],
+#                 'L4F': ['98', '99', '100', '101', '102', '103', '104', '105', '106', '106A', '107'],
+
+#                 'H1F': ['0', '1', '2', '3', '4', '5', '6', '6A', '7', '8', '9', '10', '11', '12', '13', '14', '15',
+#                         '16', '17', '18', '19',
+#                         '20', '21', '22', '23', '24', '25'],
+#                 'H1': ['26', '27', '28', '29', '30', '31', '31A', '31B', '31C', '31D', '31E', '31F', '31G', '31H',
+#                        '31I', '31J', '32'],
+#                 'H2F': ['33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51'],
+#                 'H2': ['52', '52A', '52B', '52C', '52D', '52E', '52F', '52G', '52H', '52I', '52J', '52K', '52L', '52M',
+#                        '52N', '52O', '53', '54', '55', '56'],
+#                 'H3F': ['57', '58', '59', '59A', '60', '60A', '61', '62', '63', '64', '64A', '65', '66', '67', '68',
+#                         '69', '70', '71', '72', '73', '74', '75', '76', '76A', '76B', '76C', '76D', '76E', '76F', '76G',
+#                         '76H', '76I', '77', '78', '79', '80', '81', '82', '82A', '82B', '82C', '83',
+#                         '84', '85', '86', '87', '88', '89', '90', '91', '92', '93', '94'],
+#                 'H3': ['95', '96', '97', '98', '99', '100', '100A', '100B', '100C', '100D',
+#                        '100E', '100F', '100G', '100H', '100I', '100J', '100K', '100L', '100M', '100N', '100O', '100P',
+#                        '100Q', '100R', '100S', '100T', '100U', '100V', '100W', '100X', '100Y', '100Z', '101', '102'],
+#                 'H4F': ['103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113']}
+#     elif cdr_scheme == 'kabat':
+#         CDRS = {'L1F': ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14',
+#                         '15', '16', '17', '18', '19', '20', '21', '22', '23'],
+#                 'L1': ['24', '25', '26', '27', '28', '29', '30', '30A', '30B', '30C', '30D',
+#                        '30E', '30F', '30G', '30H', '30I', '31', '32', '33', '34'],
+#                 'L2F': ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47',
+#                         '48', '49'],
+#                 'L2': ['50', '51', '51A', '52', '52A', '52B', '52C', '52D', '53', '54', '55', '56'],
+#                 'L3F': ['57', '58', '59', '60', '61',
+#                         '62', '63', '64', '65', '66', '67', '68', '69', '70', '71', '72', '73', '74', '75',
+#                         '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88'],
+#                 'L3': ['89', '90', '91', '92', '93', '94', '95', '95A', '95B', '95C', '95D', '95E', '95F', '96', '97'],
+#                 'L4F': ['98', '99', '100', '101', '102', '103', '104', '105', '106', '106A', '107'],
+
+#                 'H1F': ['0', '1', '2', '3', '4', '5', '6', '6A', '7', '8', '9', '10', '11', '12', '13', '14', '15',
+#                         '16', '17', '18', '19',
+#                         '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'],
+#                 'H1': ['31', '31A', '31B', '31C', '31D', '31E', '31F', '31G', '31H', '31I', '31J', '32', '33', '34',
+#                        '35'],
+#                 'H2F': ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49'],
+#                 'H2': ['50', '51', '52', '52A', '52B', '52C', '52D', '52E', '52F', '52G', '52H', '52I', '52J', '52K',
+#                        '52L',
+#                        '52M', '52N', '52O', '53', '54', '55', '56', '57', '58', '59', '60', '60A', '61', '62', '63',
+#                        '64', '64A', '65'],
+#                 'H3F': ['66', '67', '68',
+#                         '69', '70', '71', '72', '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '82A',
+#                         '82B', '82C', '83',
+#                         '84', '85', '86', '87', '88', '89', '90', '91', '92', '93', '94'],
+#                 'H3': ['95', '96', '97', '98', '99', '100', '100A', '100B', '100C', '100D', '100E', '100F', '100G',
+#                        '100H',
+#                        '100I', '100J', '100K', '100L', '100M', '100N', '100O', '100P', '100Q', '100R', '100S', '100T',
+#                        '100U',
+#                        '100V', '100W', '100X', '100Y', '100Z', '101', '102'],
+#                 'H4F': ['103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113']}
+#     elif cdr_scheme == 'abm':
+#         CDRS = {'L1F': ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14',
+#                         '15', '16', '17', '18', '19', '20', '21', '22', '23'],
+#                 'L1': ['24', '25', '26', '27', '28', '29', '30', '30A', '30B', '30C', '30D',
+#                        '30E', '30F', '30G', '30H', '30I', '31', '32', '33', '34'],
+#                 'L2F': ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47',
+#                         '48', '49'],
+#                 'L2': ['50', '51', '51A', '52', '52A', '52B', '52C', '52D', '53', '54', '55', '56'],
+#                 'L3F': ['57', '58', '59', '60', '61',
+#                         '62', '63', '64', '65', '66', '67', '68', '69', '70', '71', '72', '73', '74', '75',
+#                         '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88'],
+#                 'L3': ['89', '90', '91', '92', '93', '94', '95', '95A', '95B', '95C', '95D', '95E', '95F', '96', '97'],
+#                 'L4F': ['98', '99', '100', '101', '102', '103', '104', '105', '106', '106A', '107'],
+
+#                 'H1F': ['0', '1', '2', '3', '4', '5', '6', '6A', '7', '8', '9', '10', '11', '12', '13', '14', '15',
+#                         '16', '17', '18', '19',
+#                         '20', '21', '22', '23', '24', '25'],
+#                 'H1': ['26', '27', '28', '29', '30', '31', '31A', '31B', '31C', '31D', '31E', '31F', '31G', '31H',
+#                        '31I', '31J',
+#                        '32', '33', '34', '35'],
+#                 'H2F': ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49'],
+#                 'H2': ['50', '51', '52', '52A', '52B', '52C', '52D', '52E', '52F', '52G', '52H', '52I', '52J', '52K',
+#                        '52L',
+#                        '52M', '52N', '52O', '53', '54', '55', '56', '57', '58'],
+#                 'H3F': ['59', '60', '60A', '61', '62', '63', '64', '64A', '65', '66', '67', '68',
+#                         '69', '70', '71', '72', '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '82A',
+#                         '82B', '82C', '83',
+#                         '84', '85', '86', '87', '88', '89', '90', '91', '92', '93', '94'],
+#                 'H3': ['95', '96', '97', '98', '99', '100', '100A', '100B', '100C', '100D',
+#                        '100E', '100F', '100G', '100H', '100I', '100J', '100K', '100L', '100M', '100N', '100O', '100P',
+#                        '100Q', '100R', '100S', '100T', '100U', '100V', '100W', '100X', '100Y', '100Z', '101', '102'],
+#                 'H4F': ['103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113']}
+#     elif cdr_scheme == 'imgt':
+#         ###THESE ARE IMGT CDRS IN IMGT NUMBERING
+#         CDRS = {'L1F': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14',
+#                         '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26'],
+#                 'L1': ['27', '28', '29', '30', '31', '32', '32A', '32B', '32C', '32D', '32E', '32F', '32G',
+#                        '32H', '32I', '32J', '32K', '32L', '32M', '32N', '32O', '32P', '32Q', '32R', '32S',
+#                        '32T', '32U', '32V', '32W', '32X', '32Y', '32Z', '33Z', '33Y', '33X', '33W', '33V',
+#                        '33U', '33T', '33S', '33R', '33Q', '33P', '33O', '33N', '33M', '33L', '33K', '33J',
+#                        '33I', '33H', '33G', '33F', '33E', '33D', '33C', '33B', '33A', '33', '34', '35', '36',
+#                        '37', '38'],
+#                 'L2F': ['39', '40', '41', '42', '43', '44', '45', '46', '47',
+#                         '48', '49', '50', '51', '52', '53', '54', '55'],
+#                 'L2': ['56', '57', '58', '59', '60', '60A', '60B', '60C', '60D', '60E', '60F', '60G', '60H',
+#                        '60I', '60J', '60K', '60L', '60M', '60N', '60O', '60P', '60Q', '60R', '60S', '60T', '60U',
+#                        '60V', '60W', '60X', '60Y', '60Z', '61Z', '61Y', '61X', '61W', '61V', '61U', '61T', '61S',
+#                        '61R', '61Q', '61P', '61O', '61N', '61M', '61L', '61K', '61J', '61I', '61H', '61G', '61F',
+#                        '61E', '61D', '61C', '61B', '61A', '61', '62', '63', '64', '65'],
+#                 'L3F': ['66', '67', '68', '69', '70', '71', '72', '73', '74', '75',
+#                         '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88',
+#                         '89', '90', '91', '92', '93', '94', '95', '96', '97', '98', '99', '100', '101', '102', '103',
+#                         '104'],
+#                 'L3': ['105', '106', '107', '108', '109', '110', '111', '111A', '111B', '111C', '111D', '111E',
+#                        '111F', '111G', '111H', '111I', '111J', '111K', '111L', '111M', '111N', '111O', '111P', '111Q',
+#                        '111R', '111S', '111T', '111U', '111V', '111W', '111X', '111Y', '111Z',
+#                        '112Z', '112Y', '112X', '112W', '112V',
+#                        '112U', '112T', '112S', '112R', '112Q', '112P', '112O', '112N',
+#                        '112M', '112L', '112K', '112J', '112I', '112H', '112G', '112F', '112E', '112D', '112C', '112B',
+#                        '112A', '112',
+#                        '113', '114', '115', '116', '117'],
+#                 'L4F': ['118', '119', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129'],
+
+#                 'H1F': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14',
+#                         '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26'],
+#                 'H1': ['27', '28', '29', '30', '31', '32', '32A', '32B', '32C', '32D', '32E', '32F', '32G',
+#                        '32H', '32I', '32J', '32K', '32L', '32M', '32N', '32O', '32P', '32Q', '32R', '32S',
+#                        '32T', '32U', '32V', '32W', '32X', '32Y', '32Z', '33Z', '33Y', '33X', '33W', '33V',
+#                        '33U', '33T', '33S', '33R', '33Q', '33P', '33O', '33N', '33M', '33L', '33K', '33J',
+#                        '33I', '33H', '33G', '33F', '33E', '33D', '33C', '33B', '33A', '33', '34', '35', '36',
+#                        '37', '38'],
+#                 'H2F': ['39', '40', '41', '42', '43', '44', '45', '46', '47',
+#                         '48', '49', '50', '51', '52', '53', '54', '55'],
+#                 'H2': ['56', '57', '58', '59', '60', '60A', '60B', '60C', '60D', '60E', '60F', '60G', '60H',
+#                        '60I', '60J', '60K', '60L', '60M', '60N', '60O', '60P', '60Q', '60R', '60S', '60T',
+#                        '60U', '60V', '60W', '60X', '60Y', '60Z', '61Z', '61Y', '61X', '61W', '61V', '61U',
+#                        '61T', '61S', '61R', '61Q', '61P', '61O', '61N', '61M', '61L', '61K', '61J', '61I',
+#                        '61H', '61G', '61F', '61E', '61D', '61C', '61B', '61A', '61', '62', '63', '64', '65'],
+#                 'H3F': ['66', '67', '68', '69', '70', '71', '72', '73', '74', '75',
+#                         '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88',
+#                         '89', '90', '91', '92', '93', '94', '95', '96', '97', '98', '99', '100', '101', '102', '103',
+#                         '104'],
+#                 'H3': ['105', '106', '107', '108', '109', '110', '111', '111A', '111B', '111C', '111D', '111E',
+#                        '111F', '111G', '111H', '111I', '111J', '111K', '111L', '111M', '111N', '111O', '111P', '111Q',
+#                        '111R', '111S', '111T', '111U', '111V', '111W', '111X', '111Y', '111Z',
+#                        '111AA', '111BB', '111CC', '111DD', '111EE', '111FF', '112FF', '112EE', '112DD', '112CC',
+#                        '112BB', '112AA',
+#                        '112Z', '112Y', '112X', '112W', '112V',
+#                        '112U', '112T', '112S', '112R', '112Q', '112P', '112O', '112N',
+#                        '112M', '112L', '112K', '112J', '112I', '112H', '112G', '112F', '112E', '112D', '112C', '112B',
+#                        '112A', '112',
+#                        '113', '114', '115', '116', '117'],
+#                 'H4F': ['118', '119', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129']}
+
+#     elif cdr_scheme == 'north':
+#         CDRS = {
+#             'L1F': ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17',
+#                     '18', '19', '20', '21', '22', '23'],
+#             'L1': ['24', '25', '26', '27', '28', '29', '30', '30A', '30B', '30C', '30D', '30E', '30F', '30G', '30H',
+#                    '30I', '31', '32', '33', '34'],
+#             'L2F': ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48'],
+#             'L2': ['49', '50', '51', '51A', '52', '52A', '52B', '52C', '52D', '53', '54', '55', '56'],
+#             'L3F': ['57', '58', '59', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69', '70', '71', '72',
+#                     '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88'],
+#             'L3': ['89', '90', '91', '92', '93', '94', '95', '95A', '95B', '95C', '95D', '95E', '95F', '95G', '95H',
+#                    '95I', '95J', '96', '97'],
+#             'L4F': ['98', '99', '100', '101', '102', '103', '104', '105', '106', '106A', '107'],
+#             'H1F': ['0', '1', '2', '3', '4', '5', '6', '6A', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16',
+#                     '17', '18', '19', '20', '21', '22'],
+#             'H1': ['23', '24', '25', '26', '27', '28', '29', '30', '31', '31A', '31B', '31C', '31D', '31E', '31F',
+#                    '31G', '31H', '31I', '31J', '32', '33', '34', '35'],
+#             'H2F': ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49'],
+#             'H2': ['50', '51', '52', '52A', '52B', '52C', '52D', '52E', '52F', '52G', '52H', '52I', '52J', '52K', '52L',
+#                    '52M', '52N', '52O', '53', '54', '55', '56', '57', '58'],
+#             'H3F': ['59', '59A', '60', '60A', '61', '62', '63', '64', '64A', '65', '66', '67', '68', '69', '70', '71',
+#                     '72', '73', '74', '75', '76', '76A', '76B', '76C', '76D', '76E', '76F', '76G', '76H', '76I', '77',
+#                     '78', '79', '80', '81', '82', '82A', '82B', '82C', '83', '84', '85', '86', '87', '88', '89', '90',
+#                     '91', '92'],
+#             'H3': ['93', '94', '95', '96', '97', '98', '99', '100', '100A', '100B', '100C', '100D', '100E', '100F',
+#                    '100G', '100H', '100I', '100J', '100K', '100L', '100M', '100N', '100O', '100P', '100Q', '100R',
+#                    '100S', '100T', '100U', '100V', '100W', '100X', '100Y', '100Z', '101', '102'],
+#             'H4F': ['103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113']}
+
+#     return CDRS[_loop]
+
+# # ======================================================
+# # Dataset & Collate (保持不变)
+# # ======================================================
+# class ListDataset(Dataset):
+#     def __init__(self, samples):
+#         self.samples = samples
+#     def __len__(self):
+#         return len(self.samples)
+#     def __getitem__(self, idx):
+#         return self.samples[idx]
+
+# def collate_fn(batch):
+#     X_a_list = [torch.tensor(item[0], dtype=torch.float32) if not isinstance(item[0], torch.Tensor) else item[0] for item in batch]
+#     X_b_list = [torch.tensor(item[1], dtype=torch.float32) if not isinstance(item[1], torch.Tensor) else item[1] for item in batch]
+#     ag_list = [torch.tensor(item[2], dtype=torch.float32) if not isinstance(item[2], torch.Tensor) else item[2] for item in batch]
+#     y_list = [torch.tensor(item[3], dtype=torch.float32) if not isinstance(item[3], torch.Tensor) else item[3] for item in batch]
+
+#     if not X_a_list:
+#         return torch.empty(0), torch.empty(0), torch.empty(0), torch.empty(0)
+
+#     max_len = max(
+#         max(x.shape[0] for x in X_a_list),
+#         max(x.shape[0] for x in X_b_list),
+#         max(x.shape[0] for x in ag_list)
+#     )
+
+#     def pad_to_len(x, L):
+#         if x.shape[0] < L:
+#             pad = torch.zeros(L - x.shape[0], x.shape[1], dtype=x.dtype)
+#             return torch.cat([x, pad], dim=0)
+#         else:
+#             return x[:L]
+
+#     X_a_padded = torch.stack([pad_to_len(x, max_len) for x in X_a_list])
+#     X_b_padded = torch.stack([pad_to_len(x, max_len) for x in X_b_list])
+#     ag_padded = torch.stack([pad_to_len(x, max_len) for x in ag_list])
+#     y_tensor = torch.stack(y_list)
+#     return X_a_padded, X_b_padded, ag_padded, y_tensor
+
+# # ======================================================
+# # Evaluation (保持不变)
+# # ======================================================
+# def evaluate(model, loader, device):
+#     model.eval()
+#     y_true, y_pred = [], []
+#     with torch.no_grad():
+#         for X_a, X_b, ag, y in loader:
+#             if X_a.shape[0] == 0: continue
+#             X_a, X_b, ag, y = X_a.to(device), X_b.to(device), ag.to(device), y.to(device)
+#             pred = model(X_b, X_a, ag).view(-1)
+#             y_true.extend(y.cpu().numpy())
+#             y_pred.extend(pred.cpu().numpy())
+
+#     if len(y_true) == 0:
+#         return {"MSE": 0.0, "RMSE": 0.0, "MAE": 0.0, "R2": 0.0, "PCC": 0.0}
+
+#     mse = mean_squared_error(y_true, y_pred)
+#     rmse = np.sqrt(mse)
+#     mae = mean_absolute_error(y_true, y_pred)
+#     r2 = r2_score(y_true, y_pred)
+#     pcc = pearsonr(y_true, y_pred)[0] if len(set(y_true)) > 1 else 0.0
+#     return {"MSE": mse, "RMSE": rmse, "MAE": mae, "R2": r2, "PCC": pcc}
+
+# # ======================================================
+# # Data Loading & Splitting
+# # ======================================================
+# def load_dataset(path):
+#     d = torch.load(path, map_location="cpu")
+#     return {
+#         "X_a": d["X_a"].cpu().numpy(),
+#         "X_b": d["X_b"].cpu().numpy(),
+#         "antigen": d["antigen"].cpu().numpy(),
+#         "y": d["y"].cpu().numpy()
+#     }
+
+# def split_dataset(data, test_size=0.2, val_size=0.2, seed=42):
+#     X_a, X_b, ag, y = data["X_a"], data["X_b"], data["antigen"], data["y"]
+    
+#     # 【关键修改】：如果想让数据划分也随种子变化，将 random_state=42 改为 random_state=seed
+#     # 这里为了保守起见，暂时保持固定划分，仅改变模型初始化。如需完全独立实验，请取消注释下一行的 seed 变量
+#     # current_split_seed = seed 
+#     current_split_seed = 42 
+
+#     X_a_tv, X_a_test, X_b_tv, X_b_test, ag_tv, ag_test, y_tv, y_test = train_test_split(
+#         X_a, X_b, ag, y, test_size=test_size, random_state=current_split_seed
+#     )
+    
+#     val_ratio = val_size / (1 - test_size)
+#     X_a_tr, X_a_val, X_b_tr, X_b_val, ag_tr, ag_val, y_tr, y_val = train_test_split(
+#         X_a_tv, X_b_tv, ag_tv, y_tv, test_size=val_ratio, random_state=current_split_seed
+#     )
+    
+#     return {
+#         "train": (X_a_tr, X_b_tr, ag_tr, y_tr),
+#         "val": (X_a_val, X_b_val, ag_val, y_val),
+#         "test": (X_a_test, X_b_test, ag_test, y_test)
+#     }
+
+# # ======================================================
+# # Trainer (保持不变)
+# # ======================================================
+# class TrainerWithScheduler:
+#     def __init__(self, model, train_loader, val_loader, params, device):
+#         self.model = model.to(device)
+#         self.train_loader = train_loader
+#         self.val_loader = val_loader
+#         self.device = device
+#         self.opt = optim.Adam(model.parameters(), lr=params["lr"], weight_decay=params["weight_decay"])
+#         self.scheduler = ReduceLROnPlateau(self.opt, mode='min', factor=params.get("lr_factor", 0.5),
+#                                            patience=params.get("scheduler_patience", 3),
+#                                            min_lr=params.get("min_lr", 1e-6), verbose=False)
+#         self.criterion = nn.MSELoss()
+#         self.epochs = params["epochs"]
+#         self.patience = params["patience"]
+
+#     def train(self):
+#         best_mse = np.inf
+#         best_state = None
+#         wait = 0
+#         for epoch in range(1, self.epochs + 1):
+#             self.model.train()
+#             total_loss = 0.0
+#             num_batches = 0
+#             for X_a, X_b, ag, y in self.train_loader:
+#                 if X_a.shape[0] == 0: continue
+#                 X_a, X_b, ag, y = X_a.to(self.device), X_b.to(self.device), ag.to(self.device), y.to(self.device)
+#                 self.opt.zero_grad()
+#                 pred = self.model(X_b, X_a, ag).view(-1)
+#                 loss = self.criterion(pred, y)
+#                 loss.backward()
+#                 self.opt.step()
+#                 total_loss += loss.item()
+#                 num_batches += 1
+            
+#             if num_batches == 0: continue
+#             avg_train_loss = total_loss / num_batches
+#             val_metrics = evaluate(self.model, self.val_loader, self.device)
+#             val_mse = val_metrics["MSE"]
+#             self.scheduler.step(val_mse)
+            
+#             # 减少打印频率，避免日志过多
+#             if epoch % 10 == 0 or epoch == 1:
+#                 print(f"  Ep {epoch:02d} | Loss: {avg_train_loss:.4f} | Val MSE: {val_mse:.4f}")
+
+#             if val_mse < best_mse:
+#                 best_mse = val_mse
+#                 best_state = copy.deepcopy(self.model.state_dict())
+#                 wait = 0
+#             else:
+#                 wait += 1
+#                 if wait >= self.patience:
+#                     break
+        
+#         if best_state is not None:
+#             self.model.load_state_dict(best_state)
+#         return self.model
+
+# # ======================================================
+# # MAIN (核心修改部分)
+# # ======================================================
+# def main():
+#     # 1. 解析命令行参数
+#     parser = argparse.ArgumentParser(description="Train PACA with specific seed")
+#     parser.add_argument("--seed", type=int, default=42, help="Random seed for this run")
+#     args = parser.parse_args()
+    
+#     # 2. 设置种子
+#     set_seed(args.seed)
+#     current_seed = args.seed
+
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     print(f"💻 Using device: {device}")
+
+#     # 数据路径配置
+#     base_dir = "/tmp/AbAgCDR/data"
+#     paths = {
+#         "train": os.path.join(base_dir, "train_data.pt"),
+#         "abbind": os.path.join(base_dir, "abbind_data.pt"),
+#         "sabdab": os.path.join(base_dir, "sabdab_data.pt"),
+#         "skempi": os.path.join(base_dir, "skempi_data.pt")
+#     }
+
+#     # 输出目录配置 (根据 seed 动态创建或区分)
+#     model_save_dir = "/tmp/AbAgCDR/model"
+#     result_save_dir = "/tmp/AbAgCDR/resultsxin"
+#     os.makedirs(model_save_dir, exist_ok=True)
+#     os.makedirs(result_save_dir, exist_ok=True)
+
+#     # Load and split
+#     all_splits = {}
+#     for name, path in paths.items():
+#         if not os.path.exists(path):
+#             print(f"⚠️ Warning: File not found: {path}")
+#             continue
+#         data = load_dataset(path)
+#         # 传入 seed 以支持动态划分（如果 split_dataset 内部使用了该参数）
+#         all_splits[name] = split_dataset(data, seed=current_seed)
+
+#     if not all_splits:
+#         print("❌ Error: No data loaded.")
+#         return
+
+#     # Prepare Samples
+#     all_train_samples = []
+#     sample_weights = []
+#     dataset_weights = {'train': 4.0, 'abbind': 1.0, 'sabdab': 1.5, 'skempi': 1.5}
+
+#     for name in paths.keys():
+#         if name not in all_splits: continue
+#         tr = all_splits[name]["train"]
+#         w = dataset_weights.get(name, 0.1)
+#         for i in range(len(tr[3])):
+#             all_train_samples.append((tr[0][i], tr[1][i], tr[2][i], tr[3][i]))
+#             sample_weights.append(w)
+
+#     val_samples = []
+#     for name, split in all_splits.items():
+#         va = split["val"]
+#         for i in range(len(va[3])):
+#             val_samples.append((va[0][i], va[1][i], va[2][i], va[3][i]))
+
+#     sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
+
+#     # Grid Search Params (简化版以节省时间，可根据需要恢复完整版)
+#     param_grid = {
+#         'lr': [1e-4, 5e-4],
+#         'batch_size': [16, 32],
+#         'epochs': [60],
+#         'patience': [15],
+#         'weight_decay': [1e-5, 1e-4],
+#         'scheduler_patience': [3],
+#         'lr_factor': [0.5],
+#         'min_lr': [1e-6]
+#     }
+
+#     keys, values = zip(*param_grid.items())
+#     param_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+
+#     print(f"🚀 Starting Grid Search for Seed {current_seed} ({len(param_combinations)} trials)...")
+
+#     best_score = -np.inf
+#     best_params = None
+#     best_model_state = None
+    
+#     # Load scaler if exists (assuming same for all seeds)
+#     label_scaler = None
+#     first_path = list(paths.values())[0]
+#     if os.path.exists(first_path):
+#         temp_d = torch.load(first_path, map_location="cpu")
+#         label_scaler = temp_d.get("label_scaler", None)
+
+#     for trial_idx, params in enumerate(param_combinations):
+#         if trial_idx % 5 == 0:
+#             print(f"  ... Trial {trial_idx+1}/{len(param_combinations)}")
+        
+#         current_bs = params['batch_size']
+#         train_loader = DataLoader(ListDataset(all_train_samples), batch_size=current_bs, sampler=sampler, collate_fn=collate_fn, shuffle=False)
+#         val_loader = DataLoader(ListDataset(val_samples), batch_size=current_bs, shuffle=False, collate_fn=collate_fn)
+
+#         model = CombinedModel(
+#             [getCDRPos("H1"), getCDRPos("H2"), getCDRPos("H3")],
+#             [getCDRPos("L1"), getCDRPos("L2"), getCDRPos("L3")],
+#             num_heads=2, embed_dim=532, antigen_embed_dim=500
+#         )
+
+#         trainer = TrainerWithScheduler(model, train_loader, val_loader, params, device)
+#         trained_model = trainer.train()
+
+#         val_metrics = evaluate(trained_model, val_loader, device)
+#         score = val_metrics['PCC']
+
+#         if score > best_score:
+#             best_score = score
+#             best_params = copy.deepcopy(params)
+#             best_model_state = copy.deepcopy(trained_model.state_dict())
+
+#     # Save Best Model for THIS Seed
+#     model_filename = f"PWAARPEbest_model_seed_{current_seed}.pth"
+#     model_path = os.path.join(model_save_dir, model_filename)
+    
+#     if best_model_state is not None:
+#         torch.save({
+#             'model_state_dict': best_model_state,
+#             'params': best_params,
+#             'label_scaler': label_scaler,
+#             'seed': current_seed
+#         }, model_path)
+#         print(f"💾 Best model for Seed {current_seed} saved to: {model_path}")
+#     else:
+#         print("❌ No model trained successfully for this seed.")
+#         return
+
+#     # Final Evaluation & CSV Generation
+#     final_model = CombinedModel(
+#         [getCDRPos("H1"), getCDRPos("H2"), getCDRPos("H3")],
+#         [getCDRPos("L1"), getCDRPos("L2"), getCDRPos("L3")],
+#         num_heads=2, embed_dim=532, antigen_embed_dim=500
+#     )
+#     final_model.load_state_dict(best_model_state)
+#     final_model.to(device)
+#     final_model.eval()
+
+#     print(f"\n🧪 Generating Predictions for Seed {current_seed}...")
+
+#     # Helper to save predictions
+#     def save_predictions(name, test_data_tuple, filename_suffix):
+#         samples = []
+#         for i in range(len(test_data_tuple[3])):
+#             samples.append((test_data_tuple[0][i], test_data_tuple[1][i], test_data_tuple[2][i], test_data_tuple[3][i]))
+        
+#         loader = DataLoader(ListDataset(samples), batch_size=32, shuffle=False, collate_fn=collate_fn)
+        
+#         y_true_list = []
+#         y_pred_list = []
+#         indices = [] # 如果需要索引列
+
+#         with torch.no_grad():
+#             for idx, (X_a, X_b, ag, y) in enumerate(loader):
+#                 if X_a.shape[0] == 0: continue
+#                 X_a, X_b, ag = X_a.to(device), X_b.to(device), ag.to(device)
+#                 pred = final_model(X_b, X_a, ag).view(-1)
+                
+#                 y_true_list.extend(y.cpu().numpy())
+#                 y_pred_list.extend(pred.cpu().numpy())
+#                 # 生成简单的索引 (全局索引可能需要更复杂的逻辑，这里用相对索引)
+#                 start_idx = idx * loader.batch_size
+#                 indices.extend(range(start_idx, start_idx + len(y)))
+
+#         import pandas as pd
+#         df = pd.DataFrame({
+#             'Index': indices,
+#             'true_ddg': y_true_list,
+#             'pred_ddg': y_pred_list
+#         })
+        
+#         out_path = os.path.join(result_save_dir, filename_suffix)
+#         df.to_csv(out_path, index=False)
+#         print(f"✅ Saved predictions for {name}: {out_path}")
+        
+#         # Print metrics
+#         mae = mean_absolute_error(y_true_list, y_pred_list)
+#         pcc = pearsonr(y_true_list, y_pred_list)[0] if len(set(y_true_list))>1 else 0
+#         print(f"   -> MAE: {mae:.4f}, PCC: {pcc:.4f}")
+#         return mae, pcc
+
+#     results_summary = {}
+
+#     # Generate for each dataset
+#     for name, split in all_splits.items():
+#         te = split["test"]
+#         file_name = f"PWAARPE{name}_predictions_seed_{current_seed}.csv"
+#         mae, pcc = save_predictions(name, te, file_name)
+#         results_summary[name] = {'MAE': mae, 'PCC': pcc}
+
+#     # Summary
+#     print("\n" + "="*60)
+#     print(f"🏆 SEED {current_seed} COMPLETE")
+#     print("="*60)
+#     for name, metrics in results_summary.items():
+#         print(f"{name.upper():10} | MAE: {metrics['MAE']:.4f} | PCC: {metrics['PCC']:.4f}")
+#     print("="*60)
+#     print(f"💡 下一步：请对 seeds 0, 1, 2, 3, 4 重复此过程，然后运行统计脚本。")
+
+# if __name__ == "__main__":
+#     main()
 
 
 
