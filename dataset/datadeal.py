@@ -20,7 +20,27 @@ def load_data_from_tsv(file_path):
     delta_g = data['delta_g'].tolist()  # 亲和力值
     return antibody_sequences_a, antibody_sequences_b, antigen_sequences, delta_g
 
+# PWAA 模块
 def pwaa_encode_sequence(sequences, L=None):
+    """
+    Position Weight Amino Acid (PWAA) encoding for protein sequences.
+    
+    This function implements the PWAA feature extraction method, which captures
+    positional distribution patterns of amino acids around each residue by
+    applying a sliding window with position-dependent weights.
+    
+    Reference:
+        Shi et al. (2012) A method to distinguish between lysine acetylation
+        and lysine methylation from protein sequences. J Theor Biol.
+    
+    Args:
+        sequences (list of str): List of amino acid sequences
+        L (int, optional): Half-window size. If None, uses seq_len // 2.
+            The full window size is 2L + 1.
+    
+    Returns:
+        torch.Tensor: PWAA features with shape [batch_size, max_seq_len, 20]
+    """
     pwaa_features = []
 
     for seq in sequences:
