@@ -1,0 +1,11 @@
+{
+  "original": {
+    "Composite": 0.43444841403827633,
+    "MSE": 0.5329957604408264,
+    "RMSE": 0.7300655841827393,
+    "MAE": 0.5315542221069336,
+    "R2": 0.4338718948126631,
+    "PCC": 0.6717490037490258,
+    "model_path": "/root/autodl-tmp/AbAgCDR/results_full_paca/models/best_model_weight_original_seed42.pth"
+  }
+}
