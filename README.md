@@ -21,6 +21,24 @@ Load preprocessed test files with:# PACA‑Affinity: Sequence‑Based Antigen‑
 
 This repository contains the code for **PACA‑Affinity**, a sequence‑based deep learning model for predicting antigen–antibody binding affinity. The model leverages RoFormer and CNN architectures with attention mechanisms to achieve high accuracy using only amino acid sequences, without requiring 3D structural information. It is designed for applications in computational immunology and antibody engineering.
 
+## Revision R2: seed-level statistical analysis and homology-aware evaluation
+
+This revision adds two items reported in the revised manuscript:
+
+**1. Seed-level statistical comparison (Table 4).** PACA-Affinity and the PWAA+RPE baseline were retrained under a unified protocol (identical
+merged training/validation pools, 10 random seeds, fixed test sets). Run-level results are in `results/multi_seed_results_paca.json` and `results/multi_seed_results_rpe.json`. To reproduce Table 4:
+
+    python seed_level_analysis.py results/multi_seed_results_paca.json results/multi_seed_results_rpe.json
+
+The script reports per-dataset mean +/- SD of test MAE, the relative MAE reduction recomputed from displayed values, the paired percentile
+bootstrap 95% CI (10,000 resamples) of the paired MAE difference, a one-sided exact Wilcoxon signed-rank test with Holm adjustment across
+the four datasets, and the matched-pairs rank-biserial correlation. 
+
+**2. Cluster-based split evaluation (Supplementary Table S2).** Described
+in Section III-D of the manuscript; cluster assignments were generated
+with MMseqs2 (easy-cluster; --min-seq-id 0.9, -c 0.8, --cov-mode 0,
+default cluster mode 0, sensitivity 4.0).
+
 ## 📁 Project Structure
 
 > **Note**: All raw input data should be placed in the `data/` directory. Preprocessed data will be generated automatically during execution.
