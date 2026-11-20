@@ -26,7 +26,7 @@ This repository contains the code for **PACA‑Affinity**, a sequence‑based de
 This revision adds two items reported in the revised manuscript:
 
 **1. Seed-level statistical comparison (Table 4).** PACA-Affinity and the PWAA+RPE baseline were retrained under a unified protocol (identical
-merged training/validation pools, 10 random seeds, fixed test sets). Run-level results are in `results/multi_seed_results_paca.json` and `results/multi_seed_results_rpe.json`. To reproduce Table 4:
+merged training/validation pools, 10 random seeds, fixed test sets). Run-level results are in `results_full_paca/multi_seed_results_paca.json` and `results_full_rpe/multi_seed_results_rpe.json`. To reproduce Table 4:
 
     python seed_level_analysis.py results/multi_seed_results_paca.json results/multi_seed_results_rpe.json
 
